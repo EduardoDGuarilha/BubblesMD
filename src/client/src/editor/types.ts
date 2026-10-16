@@ -23,6 +23,7 @@ export interface EditorHandle {
   rectFor(from: number, to: number): EditorRect | null;
   scrollTo(offset: number): void;
   focus(): void;
+  hasFocus(): boolean;
 }
 
 export interface EditorCallbacks {

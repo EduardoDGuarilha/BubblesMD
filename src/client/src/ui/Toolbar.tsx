@@ -27,11 +27,13 @@ const FORMATS: { cmd: FormatCommand; label: string; title: string; className?: s
 export function spendSummary(state: StoreState) {
   let total = 0;
   let unknown = 0;
+  let pending = 0;
   for (const e of state.ledger) {
-    if (e.charged === 'yes' && e.usage?.cost != null) total += e.usage.cost;
+    if (e.status === 'pending') pending++;
+    else if (e.charged === 'yes' && e.usage?.cost != null) total += e.usage.cost;
     else if (e.charged === 'unknown' && e.provider !== 'fake') unknown++;
   }
-  return { total, unknown, count: state.ledger.length };
+  return { total, unknown, pending, count: state.ledger.length };
 }
 
 export function Toolbar({ store, state, config, canFormat, onFormat, onSwitchView }: Props) {
@@ -98,6 +100,7 @@ export function Toolbar({ store, state, config, canFormat, onFormat, onSwitchVie
         <button type="button" className="spend" aria-expanded={open} onClick={() => setOpen(!open)} title="Tracked spending and model details">
           {`$${spend.total.toFixed(4)}`}
           {spend.unknown > 0 && <span className="unknown"> +{spend.unknown} unknown</span>}
+          {spend.pending > 0 && <span className="unknown"> · pending</span>}
         </button>
         {open && <SpendPanel state={state} config={config} onClose={() => setOpen(false)} />}
       </div>

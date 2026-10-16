@@ -241,6 +241,9 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
     focus() {
       editorRef.current?.commands.focus();
     },
+    hasFocus() {
+      return !!editorRef.current?.view.hasFocus();
+    },
     format(cmd) {
       const chain = editorRef.current?.chain().focus();
       if (!chain) return;

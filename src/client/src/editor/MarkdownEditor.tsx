@@ -152,6 +152,9 @@ export const MarkdownEditor = forwardRef<EditorHandle, Props>(function MarkdownE
     focus() {
       viewRef.current?.focus();
     },
+    hasFocus() {
+      return !!viewRef.current?.hasFocus;
+    },
   }), []);
 
   return <div ref={hostRef} className="editor-host markdown" />;

@@ -66,7 +66,7 @@ export function ReviewLayer({ store, state, handle, scrollerRef, tick, narrow, r
     markers.sort((a, b) => a.top - b.top);
     for (let i = 1; i < markers.length; i++) markers[i].top = Math.max(markers[i].top, markers[i - 1].top + MARKER_GAP);
     let plus: number | null = null;
-    const sel = handle.getSelection();
+    const sel = handle.hasFocus() ? handle.getSelection() : null;
     if (sel && !('error' in sel)) {
       const rect = handle.rectFor(sel.from, sel.to);
       if (rect) plus = rect.top - railTop;

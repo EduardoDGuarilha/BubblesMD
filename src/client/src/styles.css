@@ -349,7 +349,7 @@ button:disabled {
 .canvas {
   position: relative;
   display: grid;
-  grid-template-columns: 44px minmax(0, 66ch) 36px minmax(380px, 1fr);
+  grid-template-columns: 44px minmax(0, 66ch) 36px minmax(340px, 1fr);
   max-width: 1480px;
   min-height: 100%;
 }
@@ -610,7 +610,7 @@ button:disabled {
 
 .plus-bubble {
   position: absolute;
-  left: 4px;
+  left: 62px;
   border: 1.3px solid var(--edge);
   background: var(--bubble);
   border-radius: 18px;
@@ -622,8 +622,8 @@ button:disabled {
 
 .family {
   position: absolute;
-  left: 4px;
-  width: min(calc(100% - 24px), 540px);
+  left: 66px;
+  width: min(calc(100% - 84px), 520px);
   z-index: 6;
   animation: bubble-in 0.18s ease-out;
 }
@@ -1271,12 +1271,48 @@ button:disabled {
   padding-top: 20px;
 }
 
+.top,
+.toolbar,
+.banner,
+.footer,
+.dock {
+  flex-shrink: 0;
+}
+
 .dock {
   border-top: 1px solid var(--rule);
   background: var(--paper);
   max-height: 55vh;
   overflow: auto;
   padding: 10px 14px 14px;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.family.docked {
+  position: static;
+  width: auto;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.app.narrow .toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.app.narrow .toolbar .spacer {
+  display: none;
+}
+
+.app.narrow .top {
+  padding: 8px 14px;
+  gap: 10px;
+}
+
+.app.narrow .footer .quiet:not(.right) {
+  display: none;
 }
 
 .dock .family.docked .review::before,
@@ -1287,7 +1323,6 @@ button:disabled {
 @media (pointer: coarse) {
   .tiny,
   .marker,
-  .src-insert,
   .add-thought {
     min-width: 44px;
     min-height: 44px;
