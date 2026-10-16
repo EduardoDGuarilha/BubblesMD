@@ -1,5 +1,5 @@
 import { History } from '../core/history';
-import { diffCandidate, effectiveText } from '../core/changes';
+import { diffCandidate, effectiveText, isUnchanged, keepOriginalChecks } from '../core/changes';
 import type { Hunk } from '../core/textChanges';
 import {
   acceptReview,
@@ -22,7 +22,7 @@ import {
   type Tracked,
   type Usage,
 } from '../core/workspace';
-import { ApiError, type SuggestFn, type SuggestPayload } from '../services/api';
+import { ApiError, type AttemptInfo, type SuggestFn, type SuggestPayload, type SuggestResponse } from '../services/api';
 
 export const LIMITS = { selectionChars: 16000, contextEachSide: 2000, reflectionChars: 8000 };
 
@@ -47,6 +47,8 @@ export interface LedgerEntry {
   usage: Usage | null;
   latencyMs: number | null;
   at: number;
+  /** 2 for the automatic no-change correction made within the same request. */
+  attempt?: number;
 }
 
 export interface DecisionEntry {
@@ -130,6 +132,8 @@ interface Capture {
   thoughts: string[];
   keepOriginal: KeepOriginal[];
   revision: number;
+  /** What the result must differ from: the selection (initial/refresh) or the effective proposal (refine/revise). */
+  baseline: string;
 }
 
 export class WorkspaceStore {
@@ -178,9 +182,11 @@ export class WorkspaceStore {
 
   getState = () => this.state;
 
-  onEvent(fn: (e: StoreEvent) => void) {
+  onEvent(fn: (e: StoreEvent) => void): () => void {
     this.eventListeners.add(fn);
-    return () => this.eventListeners.delete(fn);
+    return () => {
+      this.eventListeners.delete(fn);
+    };
   }
 
   private emit(e: StoreEvent) {
@@ -368,6 +374,39 @@ export class WorkspaceStore {
     return changed && thoughtId === null ? id : null;
   }
 
+  /**
+   * Enter on a reflection: commit it, then ask for a suggestion directly. The first reflection produces the initial
+   * suggestion; a new or edited later reflection requests an update (refresh when the passage changed meanwhile).
+   * Unchanged reflections and busy/generating states never start a request.
+   */
+  submitReflection(reviewId: string, thoughtId: string | null, text: string) {
+    const before = this.state.tracked.reviews[reviewId];
+    const previous = thoughtId ? before?.thoughts.find((t) => t.id === thoughtId)?.text : undefined;
+    this.commitThought(reviewId, thoughtId, text);
+    const r = this.state.tracked.reviews[reviewId];
+    if (!r || r.status !== 'open' || this.isGenerating(reviewId)) return;
+    const changed = thoughtId === null ? text.trim() !== '' : previous !== undefined && previous.trim() !== text.trim();
+    const v = r.activeVersion ? this.state.versions[r.activeVersion] : null;
+    if (!v) {
+      if (r.thoughts.some((t) => t.text.trim())) this.requestSuggestion(reviewId, 'initial');
+      return;
+    }
+    if (!changed) return;
+    if (this.state.activeRequest) {
+      this.notify('Busy — your reflection is saved. Use Suggest when the other suggestion finishes.');
+      return;
+    }
+    this.requestSuggestion(reviewId, isCurrent(this.state.tracked, r, v) ? 'refine' : 'refresh');
+  }
+
+  /** Explicit coherence repair after popping individual edits; popping alone never calls the model. */
+  revise(reviewId: string) {
+    const r = this.state.tracked.reviews[reviewId];
+    const v = r?.activeVersion ? this.state.versions[r.activeVersion] : null;
+    if (!r || !v || !r.popped.length || !isCurrent(this.state.tracked, r, v)) return 'invalid';
+    return this.requestSuggestion(reviewId, 'revise');
+  }
+
   popThought(reviewId: string, thoughtId: string) {
     if (this.isGenerating(reviewId)) return;
     if (this.commit(popThought(this.state.tracked, reviewId, thoughtId))) this.emit({ type: 'pop' });
@@ -462,9 +501,14 @@ export class WorkspaceStore {
     }
     const prior = r.activeVersion ? versions[r.activeVersion] : null;
     const keepOriginal = prior ? keepOriginalChoices(prior, r.popped) : [];
+    // The writer's current proposal: the active suggestion with their pops applied.
+    const effective = prior ? effectiveText(prior.diff, r.popped) : source;
+    if ((action === 'refine' || action === 'revise') && !prior) return 'invalid';
+    const priorThoughts = new Set((prior?.thoughts ?? []).map((t) => t.trim()));
     const requestId = uid();
     const mode = this.state.prefs.mode;
     const capture: Capture = {
+      baseline: action === 'refine' || action === 'revise' ? effective : source,
       requestId,
       reviewId,
       action,
@@ -484,10 +528,10 @@ export class WorkspaceStore {
       selection: source,
       contextBefore: tracked.md.slice(Math.max(0, r.from - LIMITS.contextEachSide), r.from),
       contextAfter: tracked.md.slice(r.to, r.to + LIMITS.contextEachSide),
-      reflections: r.thoughts.filter((t) => t.text.trim()).map((t) => ({ id: t.id, text: t.text })),
-      prior: prior
-        ? { source: prior.source, candidate: prior.outcome === 'replace' ? prior.replacement : prior.source, keepOriginal }
-        : null,
+      reflections: r.thoughts
+        .filter((t) => t.text.trim())
+        .map((t) => ({ id: t.id, text: t.text, isNew: !!prior && !priorThoughts.has(t.text.trim()) })),
+      prior: prior ? { source: prior.source, candidate: effective, keepOriginal } : null,
     };
     const controller = new AbortController();
     this.controllers.set(requestId, controller);
@@ -516,40 +560,66 @@ export class WorkspaceStore {
     return 'started';
   }
 
-  private updateLedger(requestId: string, patch: Partial<LedgerEntry>): LedgerEntry[] {
-    return this.state.ledger.map((e) => (e.requestId === requestId ? { ...e, ...patch } : e));
-  }
-
   private releaseLock(requestId: string): Partial<StoreState> {
     this.controllers.delete(requestId);
     return this.state.activeRequest?.requestId === requestId ? { activeRequest: null } : {};
   }
 
-  private finish(c: Capture, res: import('../services/api').SuggestResponse) {
-    const charged: LedgerEntry['charged'] = res.provider === 'fake' ? 'no' : res.usage.cost !== null ? 'yes' : 'unknown';
+  /** One ledger entry per provider call; the automatic correction is recorded as attempt 2 of the same request. */
+  private recordAttempts(c: Capture, attempts: AttemptInfo[], provider: string | null, status: LedgerEntry['status'], failedCharge?: 'no' | 'unknown') {
+    let ledger = this.state.ledger;
+    attempts.forEach((a, i) => {
+      const id = i === 0 ? c.requestId : `${c.requestId}#${i + 1}`;
+      const charged: LedgerEntry['charged'] = provider === 'fake' ? 'no' : a.usage.cost !== null ? 'yes' : 'unknown';
+      const patch: Partial<LedgerEntry> = { status, model: a.model, provider, usage: a.usage, charged, latencyMs: a.latencyMs, attempt: i + 1 };
+      if (ledger.some((e) => e.requestId === id)) ledger = ledger.map((e) => (e.requestId === id ? { ...e, ...patch } : e));
+      else ledger = [...ledger, { requestId: id, reviewId: c.reviewId, action: c.action, mode: c.mode, at: Date.now(), ...patch } as LedgerEntry];
+    });
+    if (!attempts.length && failedCharge) {
+      ledger = ledger.map((e) => (e.requestId === c.requestId ? { ...e, status, charged: failedCharge } : e));
+    }
+    return ledger;
+  }
+
+  private finish(c: Capture, res: SuggestResponse) {
     const base: Partial<StoreState> = this.releaseLock(c.requestId);
     const live = this.state.tracked.reviews[c.reviewId];
     const req = this.state.requests[c.reviewId];
     const accepted = live?.status === 'open' && req?.requestId === c.requestId && res.requestId === c.requestId;
-    const ledger = this.updateLedger(c.requestId, {
-      status: accepted ? 'completed' : 'ignored',
-      model: res.model,
-      provider: res.provider,
-      usage: res.usage,
-      charged,
-      latencyMs: res.latencyMs,
-    });
+    const attempts = res.attempts?.length ? res.attempts : [{ model: res.model, outcome: res.outcome, usage: res.usage, latencyMs: res.latencyMs }];
+    const ledger = this.recordAttempts(c, attempts, res.provider, accepted ? 'completed' : 'ignored');
     if (!accepted) {
       this.set({ ...base, ledger });
       return;
     }
-    const replacement = res.outcome === 'replace' ? (res.replacement ?? '') : c.source;
+    const requests = { ...this.state.requests };
+    delete requests[c.reviewId];
+    const replacement = res.replacement ?? '';
+    const unchanged = res.outcome === 'unchanged' || (res.outcome === 'replace' && isUnchanged(c.baseline, replacement));
+    if (res.outcome !== 'replace' || unchanged) {
+      // Never install a non-result: the previous proposal and reflections stay as they are.
+      if (c.action === 'revise' && unchanged) {
+        this.set({ ...base, ledger, requests });
+        this.notify('Nothing to revise — the proposal already reads coherently.');
+        return;
+      }
+      const reason = res.reason ? ` ${res.reason}` : '';
+      const error =
+        res.outcome === 'cannot_apply'
+          ? `Could not apply.${reason}`
+          : attempts.length > 1
+            ? 'No change, even after one corrective retry. Your previous proposal is kept.'
+            : `The model made no change.${reason} Your previous proposal is kept.`;
+      requests[c.reviewId] = { requestId: c.requestId, action: c.action, status: 'failed', error, startedAt: Date.now() };
+      this.set({ ...base, ledger, requests });
+      return;
+    }
     const version: CandidateVersion = {
       id: uid(),
       reviewId: c.reviewId,
       requestId: c.requestId,
       action: c.action,
-      outcome: res.outcome,
+      outcome: 'replace',
       reason: res.reason,
       source: c.source,
       nearBefore: c.nearBefore,
@@ -565,9 +635,9 @@ export class WorkspaceStore {
       latencyMs: res.latencyMs,
       revision: c.revision,
       createdAt: Date.now(),
+      attempts: attempts.length,
+      checks: keepOriginalChecks(replacement, c.keepOriginal),
     };
-    const requests = { ...this.state.requests };
-    delete requests[c.reviewId];
     this.set({ ...base, ledger, requests, versions: { ...this.state.versions, [version.id]: version } }, false);
     this.commit(installVersion(this.state.tracked, c.reviewId, version.id));
     const r = this.state.tracked.reviews[c.reviewId];
@@ -580,10 +650,16 @@ export class WorkspaceStore {
     const e = err instanceof ApiError ? err : new ApiError(String(err), 0, 'client', 'unknown');
     const cancelled = e.code === 'cancelled';
     const base = this.releaseLock(c.requestId);
-    const ledger = this.updateLedger(c.requestId, {
-      status: cancelled ? 'cancelled' : 'failed',
-      charged: e.charged === 'no' ? 'no' : 'unknown',
-    });
+    const status: LedgerEntry['status'] = cancelled ? 'cancelled' : 'failed';
+    let ledger = this.recordAttempts(c, e.attempts, e.attempts.length ? 'openrouter' : null, status, e.charged === 'no' ? 'no' : 'unknown');
+    if (e.attempts.length) {
+      // The call that failed after a completed attempt has its own, unknown charge.
+      ledger = [
+        ...ledger,
+        { requestId: `${c.requestId}#${e.attempts.length + 1}`, reviewId: c.reviewId, action: c.action, mode: c.mode, model: null, provider: null,
+          status, charged: e.charged === 'no' ? 'no' : 'unknown', usage: null, latencyMs: null, at: Date.now(), attempt: e.attempts.length + 1 },
+      ];
+    }
     const requests = { ...this.state.requests };
     if (requests[c.reviewId]?.requestId === c.requestId) {
       if (cancelled) delete requests[c.reviewId];

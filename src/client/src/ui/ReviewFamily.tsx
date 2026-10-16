@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref, type TextareaHTMLAttributes } from 'react';
 import { effectiveText } from '../core/changes';
 import { isCurrent, type CandidateVersion, type ReviewState, type Thought } from '../core/workspace';
 import type { RequestState, StoreState, WorkspaceStore } from '../state/store';
 import { renderCandidate } from './candidateHtml';
 import { formatCost } from './format';
+import { rupture, ruptureAll } from './fx';
+import { PlusIcon } from './PlusIcon';
 
 interface Props {
   store: WorkspaceStore;
@@ -14,12 +16,17 @@ interface Props {
   offscreen: boolean;
   onBackToPassage(): void;
   onRetarget(): void;
-  onLocateChange(changeId: string | null): void;
+  onHoverChange(changeId: string | null): void;
 }
 
 const isSubmitKey = (e: KeyboardEvent) => e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229;
 
-export function ReviewFamily({ store, state, review, raw, hovered, offscreen, onBackToPassage, onRetarget, onLocateChange }: Props) {
+/**
+ * One review family: the suggestion bubble with its reflections clustered beneath it. Every bubble sizes to its
+ * content. Enter on a reflection submits it (first → initial suggestion, later → updated suggestion).
+ */
+export function ReviewFamily({ store, state, review, raw, hovered, offscreen, onBackToPassage, onRetarget, onHoverChange }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const version = review.activeVersion ? state.versions[review.activeVersion] : null;
   const request: RequestState | undefined = state.requests[review.id];
   const generating = request?.status === 'generating';
@@ -35,19 +42,15 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
     .filter(Boolean)
     .join(' · ');
 
-  /** Enter on a reflection: before any candidate exists it submits the first request; afterwards it only commits locally. */
-  const commitAndMaybeSubmit = (thoughtId: string | null, text: string) => {
-    store.commitThought(review.id, thoughtId, text);
-    const live = store.state.tracked.reviews[review.id];
-    if (!live.activeVersion && !store.state.requests[review.id] && live.thoughts.some((t) => t.text.trim())) {
-      store.requestSuggestion(review.id, 'initial');
-    }
+  const popFamily = () => {
+    ruptureAll(rootRef.current);
+    store.discard(review.id);
   };
 
   return (
-    <div className="family-inner">
+    <div className="family-inner" ref={rootRef}>
       <div className="pair-message" aria-live="polite">
-        {pairText(version, hovered) ?? summary}
+        <span>{pairText(version, hovered) ?? summary}</span>
         {offscreen && (
           <button type="button" className="link-button back" onClick={onBackToPassage}>
             Back to passage
@@ -63,8 +66,9 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
           request={request}
           raw={raw}
           busyElsewhere={busyElsewhere}
+          onPopFamily={popFamily}
           onRetarget={onRetarget}
-          onLocateChange={onLocateChange}
+          onHoverChange={onHoverChange}
         />
       )}
       {review.blocked && !version && !request && (
@@ -76,47 +80,51 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
           .
         </div>
       )}
-      <div className="thoughts">
+      <div className={`thoughts${version || request ? '' : ' draft'}`}>
         {review.thoughts.map((t, i) => (
           <ThoughtBubble
             key={t.id}
             thought={t}
             index={i}
             locked={generating}
-            first={i === 0 && !version && !request}
-            onCommit={(text, submit) => (submit && isDraft ? commitAndMaybeSubmit(t.id, text) : store.commitThought(review.id, t.id, text))}
-            onPop={() => store.popThought(review.id, t.id)}
+            onSubmit={(text) => store.submitReflection(review.id, t.id, text)}
+            onCommit={(text) => store.commitThought(review.id, t.id, text)}
+            onPop={(el) => {
+              rupture(el);
+              store.popThought(review.id, t.id);
+            }}
           />
         ))}
         {adding && (
           <NewThought
             first={review.thoughts.length === 0}
             disabled={generating}
-            onCommit={(text, submit) => {
-              if (submit && isDraft) commitAndMaybeSubmit(null, text);
-              else store.commitThought(review.id, null, text);
+            onSubmit={(text) => {
               setAdding(false);
+              store.submitReflection(review.id, null, text);
+            }}
+            onCommit={(text) => {
+              setAdding(false);
+              store.commitThought(review.id, null, text);
             }}
             onCancel={() => setAdding(false)}
-            onDiscardReview={() => store.discard(review.id)}
+            onDiscardReview={popFamily}
           />
         )}
+        {!adding && (
+          <button
+            type="button"
+            className="bubble add-thought"
+            aria-label="Add a reflection"
+            title="Add a reflection (Enter submits it)"
+            disabled={generating}
+            onClick={() => setAdding(true)}
+          >
+            <PlusIcon />
+          </button>
+        )}
       </div>
-      {!adding && (
-        <button
-          type="button"
-          className="add-thought"
-          aria-label="Add a reflection"
-          title="Add a reflection"
-          disabled={generating}
-          onClick={() => setAdding(true)}
-        >
-          +
-        </button>
-      )}
-      {isDraft && review.thoughts.length > 0 && !adding && (
-        <p className="hint">Press Enter in a reflection to ask for a suggestion.</p>
-      )}
+      {isDraft && review.thoughts.length > 0 && !adding && <p className="hint">Press Enter in a reflection to ask for a suggestion.</p>}
     </div>
   );
 }
@@ -129,8 +137,9 @@ function MainBubble({
   request,
   raw,
   busyElsewhere,
+  onPopFamily,
   onRetarget,
-  onLocateChange,
+  onHoverChange,
 }: {
   store: WorkspaceStore;
   state: StoreState;
@@ -139,27 +148,28 @@ function MainBubble({
   request: RequestState | undefined;
   raw: boolean;
   busyElsewhere: boolean;
+  onPopFamily(): void;
   onRetarget(): void;
-  onLocateChange(changeId: string | null): void;
+  onHoverChange(changeId: string | null): void;
 }) {
+  const ref = useRef<HTMLElement>(null);
   const generating = request?.status === 'generating';
   const failed = request && request.status !== 'generating';
   const current = version ? isCurrent(state.tracked, review, version) : false;
   const effective = version ? effectiveText(version.diff, review.popped) : '';
-  const nothing = version?.outcome === 'replace' && effective === version.source;
+  const nothing = !!version && effective === version.source;
   const thoughtsChanged =
     !!version &&
     JSON.stringify(review.thoughts.map((t) => t.text.trim()).filter(Boolean)) !== JSON.stringify(version.thoughts.map((t) => t.trim()));
-  const canAccept = !!version && version.outcome === 'replace' && current && !nothing && !generating;
+  const canAccept = !!version && current && !nothing && !generating;
   const hasThoughts = review.thoughts.some((t) => t.text.trim());
   const canSuggest = !generating && !busyElsewhere && hasThoughts && !review.blocked;
+  const canRevise = !!version && current && review.popped.length > 0 && !nothing && !generating && !busyElsewhere;
   const [details, setDetails] = useState(false);
 
   let heading = 'Possible revision';
-  if (generating) heading = version ? 'Updating the suggestion…' : 'Thinking about your reflections…';
-  else if (version?.outcome === 'unchanged') heading = 'No change suggested';
-  else if (version?.outcome === 'cannot_apply') heading = 'Could not apply';
-  else if (!version && failed) heading = request.status === 'interrupted' ? 'Interrupted' : 'Suggestion failed';
+  if (generating) heading = request.action === 'revise' ? 'Revising for flow…' : version ? 'Updating the suggestion…' : 'Thinking about your reflections…';
+  else if (!version && failed) heading = request.status === 'interrupted' ? 'Interrupted' : 'No suggestion yet';
 
   const chips: string[] = [];
   if (version && !generating) {
@@ -167,17 +177,18 @@ function MainBubble({
     else if (!current) chips.push('Outdated — the passage changed');
     if (thoughtsChanged) chips.push('Thoughts changed');
     if (nothing) chips.push('Nothing to apply');
+    for (const check of version.checks ?? []) chips.push(check);
   }
 
   const decision = [...state.decisions].reverse().find((d) => d.reviewId === review.id && d.versionId === version?.id);
 
   return (
-    <section className={`review${generating ? ' generating' : ''}`} aria-label="Suggested revision" aria-busy={generating}>
+    <section ref={ref} className={`bubble review${generating ? ' generating' : ''}`} aria-label="Suggested revision" aria-busy={generating}>
       <div className="bubble-controls">
         <button type="button" className="tiny" aria-label="Minimize review" title="Minimize (Esc)" onClick={() => store.expand(null)}>
           −
         </button>
-        <button type="button" className="tiny" aria-label="Pop this review" title="Pop review (discard)" onClick={() => store.discard(review.id)}>
+        <button type="button" className="tiny" aria-label="Pop this review" title="Pop review (discard)" onClick={onPopFamily}>
           ×
         </button>
       </div>
@@ -185,7 +196,7 @@ function MainBubble({
       {chips.length > 0 && (
         <div className="chips">
           {chips.map((c) => (
-            <span key={c} className="chip">
+            <span key={c} className={`chip${c.startsWith('Changed wording') || c.startsWith('Re-added') ? ' warn' : ''}`}>
               {c}
             </span>
           ))}
@@ -193,24 +204,29 @@ function MainBubble({
       )}
       {failed && (
         <div className="error-note" role="alert">
-          {request.error ?? 'The request did not complete.'}{' '}
+          <span>{request.error ?? 'The request did not complete.'}</span>
           <button type="button" className="pill" disabled={busyElsewhere} onClick={() => store.requestSuggestion(review.id, request.action)}>
             Retry
           </button>
         </div>
       )}
-      {generating && !version && <div className="thinking" aria-hidden="true"><span /><span /><span /></div>}
-      {version && version.outcome !== 'replace' && version.reason && <p className="reason">{version.reason}</p>}
-      {version && version.outcome === 'replace' && (
+      {generating && !version && (
+        <div className="thinking" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+      {version && (
         <>
           {effective === '' && !nothing && <p className="reason">This suggestion deletes the whole selection.</p>}
           <CandidateBody
             version={version}
             popped={review.popped}
             raw={raw}
-            locked={generating || !current}
+            locked={generating}
             onPop={(id) => store.popChange(review.id, id)}
-            onHover={onLocateChange}
+            onHover={onHoverChange}
           />
         </>
       )}
@@ -225,7 +241,15 @@ function MainBubble({
       )}
       <div className="actions">
         {version && (
-          <button type="button" className="pill accept" disabled={!canAccept} onClick={() => store.accept(review.id)}>
+          <button
+            type="button"
+            className="pill accept"
+            disabled={!canAccept}
+            onClick={() => {
+              ruptureAll(ref.current?.closest('.family-inner'));
+              store.accept(review.id);
+            }}
+          >
             Accept
           </button>
         )}
@@ -233,12 +257,23 @@ function MainBubble({
           type="button"
           className="pill"
           disabled={!canSuggest}
-          title={busyElsewhere ? 'Busy — another suggestion is generating' : undefined}
+          title={busyElsewhere ? 'Busy — another suggestion is generating' : 'Generate again from your reflections'}
           onClick={() => store.requestSuggestion(review.id, version && !current ? 'refresh' : version ? 'refine' : 'initial')}
         >
           {busyElsewhere ? 'Busy' : version && !current ? 'Refresh' : 'Suggest'}
         </button>
-        <button type="button" className="pill" onClick={() => store.discard(review.id)}>
+        {version && review.popped.length > 0 && (
+          <button
+            type="button"
+            className="pill"
+            disabled={!canRevise}
+            title="Smooth the proposal after your pops, keeping the original wording you chose"
+            onClick={() => store.revise(review.id)}
+          >
+            Revise
+          </button>
+        )}
+        <button type="button" className="pill" onClick={onPopFamily}>
           Reject
         </button>
       </div>
@@ -246,6 +281,7 @@ function MainBubble({
         <div className="cand-meta">
           <button type="button" className="link-button" aria-expanded={details} onClick={() => setDetails(!details)}>
             {version.mode === 'smart' ? 'Smart' : 'Fast'} · {shortModel(version.model)} · {formatCost(version.usage.cost, version.provider)}
+            {(version.attempts ?? 1) > 1 ? ' · 2 calls' : ''}
           </button>
           {details && (
             <dl className="details">
@@ -256,7 +292,10 @@ function MainBubble({
                 {fmt(version.usage.promptTokens)} in · {fmt(version.usage.completionTokens)} out · {fmt(version.usage.reasoningTokens)} reasoning
               </dd>
               <dt>Cost</dt>
-              <dd>{formatCost(version.usage.cost, version.provider)}</dd>
+              <dd>
+                {formatCost(version.usage.cost, version.provider)}
+                {(version.attempts ?? 1) > 1 ? ' (includes one corrective retry)' : ''}
+              </dd>
               <dt>Latency</dt>
               <dd>{(version.latencyMs / 1000).toFixed(1)} s</dd>
               <dt>Request</dt>
@@ -279,9 +318,9 @@ const clip = (s: string) => (s.trim().length > 48 ? `${s.trim().slice(0, 47)}…
 function pairText(version: CandidateVersion | null, hovered: string | null): string | null {
   const g = hovered && version?.diff.groups.find((x) => x.id === hovered);
   if (!g) return null;
-  if (g.kind === 'added') return `Added · “${clip(g.replacement)}”`;
-  if (g.kind === 'deleted') return `Deleted · “${clip(g.original)}”`;
-  return `${KIND_NAME[g.kind]} · “${clip(g.original)}” → “${clip(g.replacement)}”`;
+  if (g.kind === 'added') return `Added · “${clip(g.replacement)}” · click to remove`;
+  if (g.kind === 'deleted') return `Deleted · “${clip(g.original)}” · click to keep it`;
+  return `${KIND_NAME[g.kind]} · “${clip(g.original)}” → “${clip(g.replacement)}” · click to keep the original`;
 }
 
 const fmt = (n: number | null) => (n === null ? '?' : n.toLocaleString());
@@ -311,8 +350,9 @@ function CandidateBody({
   const activate = (target: EventTarget | null) => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-change]');
     if (!el || locked) return false;
-    onPop(el.dataset.change!);
+    rupture(el);
     onHover(null);
+    onPop(el.dataset.change!);
     return true;
   };
 
@@ -330,52 +370,64 @@ function CandidateBody({
   );
 }
 
-function autosize(el: HTMLTextAreaElement | null) {
-  if (!el) return;
-  el.style.height = 'auto';
-  el.style.height = `${el.scrollHeight}px`;
+/** Textarea that grows with its text in both directions (hidden mirror in the same grid cell). */
+type GrowProps = TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string; textareaRef?: Ref<HTMLTextAreaElement> };
+
+function GrowArea({ value, placeholder, textareaRef, ...props }: GrowProps) {
+  return (
+    <span className="grow" data-value={`${value || placeholder || ''} `}>
+      <textarea ref={textareaRef} rows={1} cols={1} value={value} placeholder={placeholder} {...props} />
+    </span>
+  );
 }
 
 function ThoughtBubble({
   thought,
   index,
   locked,
-  first,
+  onSubmit,
   onCommit,
   onPop,
 }: {
   thought: Thought;
   index: number;
   locked: boolean;
-  first: boolean;
-  onCommit(text: string, submit: boolean): void;
-  onPop(): void;
+  onSubmit(text: string): void;
+  onCommit(text: string): void;
+  onPop(el: Element | null): void;
 }) {
   const [text, setText] = useState(thought.text);
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ref = useRef<HTMLElement>(null);
+  const submitted = useRef(false);
   useEffect(() => setText(thought.text), [thought.text]);
-  useLayoutEffect(() => autosize(ref.current), [text]);
   return (
-    <section className="thought" aria-label={`Reflection ${index + 1}`}>
-      <button type="button" className="tiny" aria-label={`Pop reflection ${index + 1}`} title="Pop reflection" disabled={locked} onClick={onPop}>
-        ×
-      </button>
-      <textarea
-        ref={ref}
+    <section ref={ref} className="bubble thought" aria-label={`Reflection ${index + 1}`}>
+      <GrowArea
         value={text}
-        rows={1}
         readOnly={locked}
-        aria-label={`Reflection ${index + 1}`}
+        aria-label={`Reflection ${index + 1} — Enter submits, Shift+Enter adds a line`}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => text !== thought.text && onCommit(text, false)}
+        onFocus={() => (submitted.current = false)}
+        onBlur={() => !submitted.current && text !== thought.text && onCommit(text)}
         onKeyDown={(e) => {
           if (isSubmitKey(e)) {
             e.preventDefault();
-            onCommit(text, first);
+            submitted.current = true;
+            onSubmit(text);
             (e.target as HTMLTextAreaElement).blur();
           }
         }}
       />
+      <button
+        type="button"
+        className="tiny pop-x"
+        aria-label={`Pop reflection ${index + 1}`}
+        title="Pop reflection"
+        disabled={locked}
+        onClick={() => onPop(ref.current)}
+      >
+        ×
+      </button>
     </section>
   );
 }
@@ -383,13 +435,15 @@ function ThoughtBubble({
 function NewThought({
   first,
   disabled,
+  onSubmit,
   onCommit,
   onCancel,
   onDiscardReview,
 }: {
   first: boolean;
   disabled: boolean;
-  onCommit(text: string, submit: boolean): void;
+  onSubmit(text: string): void;
+  onCommit(text: string): void;
   onCancel(): void;
   onDiscardReview(): void;
 }) {
@@ -399,30 +453,19 @@ function NewThought({
   const finish = (submit: boolean) => {
     if (done.current) return;
     done.current = true;
-    if (text.trim()) onCommit(text, submit);
-    else onCancel();
+    if (!text.trim()) onCancel();
+    else if (submit) onSubmit(text);
+    else onCommit(text);
   };
   useEffect(() => ref.current?.focus(), []);
-  useLayoutEffect(() => autosize(ref.current), [text]);
   return (
-    <section className="thought new" aria-label={first ? 'First reflection' : 'New reflection'}>
-      <button
-        type="button"
-        className="tiny"
-        aria-label={first ? 'Pop this review' : 'Cancel reflection'}
-        title={first ? 'Pop review' : 'Cancel'}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={first ? onDiscardReview : onCancel}
-      >
-        ×
-      </button>
-      <textarea
-        ref={ref}
+    <section className="bubble thought new" aria-label={first ? 'First reflection' : 'New reflection'}>
+      <GrowArea
+        textareaRef={ref}
         value={text}
-        rows={first ? 2 : 1}
         disabled={disabled}
-        placeholder={first ? 'What should change here? Enter to ask · Shift+Enter for a new line' : 'Another thought… (Enter to add)'}
-        aria-label={first ? 'First reflection — Enter asks for a suggestion' : 'New reflection'}
+        placeholder={first ? 'What should change here?' : 'Another thought…'}
+        aria-label={first ? 'First reflection — Enter asks for a suggestion' : 'New reflection — Enter asks for an updated suggestion'}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => finish(false)}
         onKeyDown={(e) => {
@@ -432,6 +475,16 @@ function NewThought({
           }
         }}
       />
+      <button
+        type="button"
+        className="tiny pop-x"
+        aria-label={first ? 'Pop this review' : 'Cancel reflection'}
+        title={first ? 'Pop review' : 'Cancel'}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={first ? onDiscardReview : onCancel}
+      >
+        ×
+      </button>
     </section>
   );
 }

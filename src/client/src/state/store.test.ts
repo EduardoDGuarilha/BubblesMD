@@ -197,3 +197,77 @@ describe('change groups', () => {
     expect(addition.groups.map((g) => g.kind)).toEqual(['added']);
   });
 });
+
+describe('reflection submission, no-change handling and Revise', () => {
+  const attempt = (cost: number) => ({ model: 'test/model', outcome: 'replace', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0, cost }, latencyMs: 1 });
+
+  it('submits a second reflection as one refine with isNew and the effective proposal', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'A small cat sat down.');
+    const v1 = store.state.versions[store.state.tracked.reviews[id].activeVersion!];
+    store.popChange(id, v1.diff.groups[0].id);
+    const effective = store.effectiveCandidate(id);
+    const calls = s.calls.length;
+    store.submitReflection(id, null, 'too verbose');
+    expect(s.calls.length).toBe(calls + 1);
+    const payload = s.calls[s.calls.length - 1].payload;
+    expect(payload.action).toBe('refine');
+    expect(payload.prior?.candidate).toBe(effective);
+    expect(payload.reflections.map((r) => [r.text, r.isNew])).toEqual([
+      ['make it better', false],
+      ['too verbose', true],
+    ]);
+    // Committing the same reflection again (blur/Enter without change) never starts another request.
+    store.submitReflection(id, store.state.tracked.reviews[id].thoughts[1].id, 'too verbose');
+    expect(s.calls.length).toBe(calls + 1);
+  });
+
+  it('does not install an unchanged result, keeps the previous proposal and records both attempts', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'A small cat sat down.');
+    const before = store.state.tracked.reviews[id];
+    store.submitReflection(id, null, 'too verbose');
+    s.calls[s.calls.length - 1].resolve({ replacement: 'A small  cat sat down.', attempts: [attempt(0.001), attempt(0.002)] });
+    await flush();
+    const after = store.state.tracked.reviews[id];
+    expect(after.activeVersion).toBe(before.activeVersion);
+    expect(after.thoughts.map((t) => t.text)).toEqual(['make it better', 'too verbose']);
+    expect(store.state.requests[id]?.status).toBe('failed');
+    expect(store.state.requests[id]?.error).toMatch(/No change/);
+    const req = s.calls[s.calls.length - 1].payload.requestId;
+    expect(store.state.ledger.filter((e) => e.requestId.startsWith(req)).map((e) => e.usage?.cost)).toEqual([0.001, 0.002]);
+  });
+
+  it('keeps a legitimate formatting-only change and an intentional deletion as real changes', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'The **cat** sat.');
+    expect(store.state.tracked.reviews[id].activeVersion).not.toBeNull();
+    const del = await reviewWithCandidate(store, s, 13, 25, '');
+    expect(store.state.versions[store.state.tracked.reviews[del].activeVersion!].replacement).toBe('');
+  });
+
+  it('revises from the effective proposal and flags kept wording that went missing', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'A small cat sat down.');
+    const v1 = store.state.versions[store.state.tracked.reviews[id].activeVersion!];
+    const altered = v1.diff.groups.find((g) => g.kind === 'altered')!;
+    store.popChange(id, altered.id);
+    expect(store.revise(id)).toBe('started');
+    const payload = s.calls[s.calls.length - 1].payload;
+    expect(payload.action).toBe('revise');
+    expect(payload.prior?.keepOriginal).toEqual([{ original: altered.original, proposed: altered.replacement }]);
+    s.calls[s.calls.length - 1].resolve({ replacement: 'One small cat sat down.' });
+    await flush();
+    const v2 = store.state.versions[store.state.tracked.reviews[id].activeVersion!];
+    expect(v2.id).not.toBe(v1.id);
+    expect(v2.checks?.[0]).toMatch(/Changed wording you kept/);
+  });
+});

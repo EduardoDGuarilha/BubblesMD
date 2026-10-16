@@ -12,6 +12,7 @@ import { Landing } from './ui/Landing';
 import { ReviewLayer } from './ui/ReviewLayer';
 import { Toolbar } from './ui/Toolbar';
 import { playPop } from './ui/sound';
+import { rupture } from './ui/fx';
 
 const MAX_IMPORT = 1_048_576;
 
@@ -46,27 +47,8 @@ export function App({ store }: { store: WorkspaceStore }) {
   useEffect(() => {
     fetchConfig().then(setConfig);
   }, []);
-  // Pop feedback: one soft sound and a small burst where the writer last pointed (none with reduced motion).
-  useEffect(() => {
-    let last = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    const track = (e: PointerEvent) => (last = { x: e.clientX, y: e.clientY });
-    window.addEventListener('pointerdown', track, true);
-    const off = store.onEvent((e) => {
-      if (e.type !== 'pop') return;
-      if (!store.state.prefs.muted) playPop();
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      const burst = document.createElement('div');
-      burst.className = 'pop-burst';
-      burst.style.left = `${last.x}px`;
-      burst.style.top = `${last.y}px`;
-      document.body.append(burst);
-      setTimeout(() => burst.remove(), 400);
-    });
-    return () => {
-      off();
-      window.removeEventListener('pointerdown', track, true);
-    };
-  }, [store]);
+  // One soap-bubble pop sound per store pop event (the rupture animation is drawn by the UI on the popped element).
+  useEffect(() => store.onEvent((e) => e.type === 'pop' && !store.state.prefs.muted && playPop()), [store]);
   useEffect(() => {
     document.title = state.hasDocument ? `${state.doc.title || 'Untitled'} — Bubbles.MD` : 'Bubbles.MD';
   }, [state.hasDocument, state.doc.title]);
@@ -214,15 +196,6 @@ function Workspace({
     else store.createReview(sel.from, sel.to);
   }, [store]);
 
-  const locate = useCallback((changeId: string) => {
-    const el = document.querySelector<HTMLElement>(`.family [data-change="${changeId}"]`);
-    if (!el) return;
-    el.focus();
-    el.scrollIntoView({ block: 'nearest' });
-    el.classList.add('flash');
-    setTimeout(() => el.classList.remove('flash'), 900);
-  }, []);
-
   const callbacks: EditorCallbacks = {
     onEdit: (next: string, hunks: Hunk[]) => store.edit(next, hunks),
     onSelectionChange: bump,
@@ -230,11 +203,13 @@ function Workspace({
     onUndo: () => store.undo(),
     onRedo: () => store.redo(),
     onCreateBubble: createBubble,
-    onSourceChange: (id: string, kind: ChangeKind) => {
+    // Clicking a source marking pops that change in the proposal (added → removed, altered/deleted → original kept).
+    onSourceChange: (id: string, _kind: ChangeKind) => {
       const current = store.state.expanded;
-      if (!current) return;
-      if (kind === 'added') locate(id);
-      else store.popChange(current, id);
+      if (!current || store.isGenerating(current)) return;
+      rupture(canvasRef.current?.querySelector(`.document [data-change="${id}"]`));
+      setHovered(null);
+      store.popChange(current, id);
     },
   };
 
@@ -280,49 +255,38 @@ function Workspace({
     return () => ro.disconnect();
   }, [bump]);
 
-  // Hover/focus pairing between source markings and candidate changes, with a connector line. The source side is
-  // drawn as an overlay: mutating editor-owned DOM would make ProseMirror/CodeMirror re-render it under the pointer.
+  // Hover/focus pairing: the matching source and suggestion spans highlight together (no connector line). The
+  // source side is drawn as an overlay: mutating editor-owned DOM would make ProseMirror/CodeMirror re-render it.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const svg = canvas.querySelector<SVGSVGElement>('.hover-line');
-    const path = svg?.querySelector('path');
-    const boxes = svg?.querySelector('g');
+    const boxes = canvas.querySelector('.overlay .boxes');
     const clear = () => {
       document.querySelectorAll('.family .linked').forEach((el) => el.classList.remove('linked'));
-      path?.setAttribute('d', '');
       boxes?.replaceChildren();
       setHovered(null);
     };
     const link = (target: EventTarget | null) => {
       const el = (target as HTMLElement | null)?.closest?.<HTMLElement>('[data-change]');
-      if (!el || !path || !boxes) return;
+      if (!el || !boxes) return;
       const id = el.dataset.change!;
       const kind = el.dataset.kind ?? 'altered';
       clear();
       setHovered(id);
       document.querySelectorAll(`.family [data-change="${id}"]`).forEach((x) => x.classList.add('linked'));
       const c = canvas.getBoundingClientRect();
-      const sourceRects = [...canvas.querySelectorAll<HTMLElement>(`.document [data-change="${id}"]`)].flatMap((x) => [...x.getClientRects()]);
-      for (const r of sourceRects) {
-        const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        box.setAttribute('x', String(r.left - c.left - 2));
-        box.setAttribute('y', String(r.top - c.top - 1));
-        box.setAttribute('width', String(r.width + 4));
-        box.setAttribute('height', String(r.height + 2));
-        box.setAttribute('rx', '9');
-        box.setAttribute('class', `link-box ${kind}`);
-        boxes.append(box);
+      for (const x of canvas.querySelectorAll<HTMLElement>(`.document [data-change="${id}"]`)) {
+        for (const r of x.getClientRects()) {
+          const box = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          box.setAttribute('x', String(r.left - c.left - 2));
+          box.setAttribute('y', String(r.top - c.top - 1));
+          box.setAttribute('width', String(r.width + 4));
+          box.setAttribute('height', String(r.height + 2));
+          box.setAttribute('rx', String(Math.min(10, r.height / 2 + 1)));
+          box.setAttribute('class', `link-box ${kind}`);
+          boxes.append(box);
+        }
       }
-      const src = sourceRects[0];
-      const cand = canvas.querySelector<HTMLElement>(`.family [data-change="${id}"]`)?.getClientRects()[0];
-      if (!src || !cand) return;
-      const x1 = src.right - c.left + 2;
-      const y1 = src.top + src.height / 2 - c.top;
-      const x2 = cand.left - c.left - 3;
-      const y2 = cand.top + cand.height / 2 - c.top;
-      const bend = Math.max(30, (x2 - x1) / 2);
-      path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`);
     };
     const over = (e: Event) => link(e.target);
     const out = (e: Event) => (e.target as HTMLElement).closest?.('[data-change]') && clear();
@@ -331,6 +295,7 @@ function Workspace({
     document.addEventListener('focusin', over);
     document.addEventListener('focusout', out);
     return () => {
+      // Any review change (pop, accept, new version) clears obsolete hover state.
       clear();
       document.removeEventListener('pointerover', over);
       document.removeEventListener('pointerout', out);
@@ -461,11 +426,11 @@ function Workspace({
               if (sel && 'error' in sel) store.showNotice(sel.error, 'error');
               else store.retarget(id, sel?.from ?? 0, sel?.to ?? 0);
             }}
-            onLocateChange={(id) => setHovered(id)}
+            onHoverChange={(id) => setHovered(id)}
           />
-          <svg className="hover-line" aria-hidden="true">
-            <g />
-            <path />
+          <svg className="overlay" aria-hidden="true">
+            <g className="dots" />
+            <g className="boxes" />
           </svg>
         </div>
       </main>

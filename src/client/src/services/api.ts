@@ -9,7 +9,8 @@ export interface SuggestPayload {
   selection: string;
   contextBefore: string;
   contextAfter: string;
-  reflections: { id: string; text: string }[];
+  /** isNew marks reflections added or edited since the active suggestion was generated. */
+  reflections: { id: string; text: string; isNew: boolean }[];
   prior: { source: string; candidate: string; keepOriginal: KeepOriginal[] } | null;
 }
 
@@ -23,6 +24,15 @@ export interface SuggestResponse {
   mode: Mode;
   model: string;
   provider: string;
+  usage: Usage;
+  latencyMs: number;
+  /** One entry per provider call (two when the server made a no-change correction). */
+  attempts?: AttemptInfo[];
+}
+
+export interface AttemptInfo {
+  model: string;
+  outcome: string;
   usage: Usage;
   latencyMs: number;
 }
@@ -49,6 +59,8 @@ export class ApiError extends Error {
     readonly code: string,
     /** Whether the provider may have charged for this failed request. */
     readonly charged: 'no' | 'unknown',
+    /** Provider calls that did complete before the failure (their usage still counts). */
+    readonly attempts: AttemptInfo[] = [],
   ) {
     super(message);
   }
@@ -70,7 +82,7 @@ export const suggest: SuggestFn = async (payload, signal) => {
     throw new ApiError('Could not reach the Bubbles.MD server.', 0, 'network', 'unknown');
   }
   if (res.ok) return (await res.json()) as SuggestResponse;
-  let body: { error?: { code?: string; message?: string; charged?: 'no' | 'unknown' } } = {};
+  let body: { error?: { code?: string; message?: string; charged?: 'no' | 'unknown'; attempts?: AttemptInfo[] } } = {};
   try {
     body = await res.json();
   } catch {
@@ -81,6 +93,7 @@ export const suggest: SuggestFn = async (payload, signal) => {
     res.status,
     body.error?.code ?? 'http_error',
     body.error?.charged ?? 'unknown',
+    body.error?.attempts ?? [],
   );
 };
 

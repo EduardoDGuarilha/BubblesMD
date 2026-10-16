@@ -8,6 +8,7 @@ import { diffText } from '../core/textChanges';
 import type { ChangeKind } from '../core/changes';
 import { formattedExtensions, parseMarkdown, serializeDoc } from './markdownModel';
 import type { DecorationSpec, EditorCallbacks, EditorHandle } from './types';
+import { PLUS_SVG } from '../ui/PlusIcon';
 
 const EXTERNAL = 'bubblesExternal';
 const decoKey = new PluginKey<DecorationSet>('bubblesDecorations');
@@ -268,8 +269,9 @@ function sourceMarker(id: string, kind: ChangeKind): HTMLElement {
   el.className = kind === 'added' ? 'src-insert' : `src-point ${kind}`;
   el.dataset.change = id;
   el.dataset.kind = kind;
-  el.textContent = kind === 'added' ? '+' : '◆';
-  el.title = kind === 'added' ? 'Added — show the proposed text' : `${KIND_LABEL[kind]} formatting — click to keep the original`;
+  if (kind === 'added') el.innerHTML = PLUS_SVG;
+  else el.textContent = '◆';
+  el.title = kind === 'added' ? 'Added — click to remove this addition' : `${KIND_LABEL[kind]} formatting — click to keep the original`;
   el.setAttribute('role', 'button');
   el.setAttribute('aria-label', el.title);
   el.contentEditable = 'false';

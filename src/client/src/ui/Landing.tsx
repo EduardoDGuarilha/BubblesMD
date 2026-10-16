@@ -15,8 +15,10 @@ export function Landing({ onCreate, onFile, error }: Props) {
       <h1 className="brand-title">Bubbles.MD</h1>
       <p className="tagline">Select a passage, think out loud, and review a suggestion before anything changes.</p>
       <div className="landing-actions">
-        <button type="button" className="create-bubble" onClick={onCreate}>
+        <button type="button" className="bubble create-bubble" onClick={onCreate}>
           <span>New document</span>
+          <span className="bubble landing-mini a" aria-hidden="true" />
+          <span className="bubble landing-mini b" aria-hidden="true" />
         </button>
         <button
           type="button"

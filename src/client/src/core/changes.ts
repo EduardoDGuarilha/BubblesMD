@@ -108,3 +108,35 @@ export function effectiveText(diff: CandidateDiff, popped: readonly string[]): s
   }
   return out;
 }
+
+/**
+ * Textual no-change test shared with the server: runs of spaces/tabs within a line and trailing whitespace are
+ * ignored; newlines, Markdown syntax and an intentionally empty replacement still count as changes. This proves
+ * only that the text did or did not change, never that it improved.
+ */
+export function normalizeForCompare(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trimEnd())
+    .join('\n')
+    .trimEnd();
+}
+
+export function isUnchanged(baseline: string, result: string): boolean {
+  if (result.trim() === '' && baseline.trim() !== '') return false;
+  return normalizeForCompare(baseline) === normalizeForCompare(result);
+}
+
+const clipQuote = (s: string) => (s.length > 40 ? `${s.slice(0, 39)}…` : s);
+
+/** Flag kept original wording that disappeared, or rejected additions that came back, in a new candidate. */
+export function keepOriginalChecks(replacement: string, keep: readonly { original: string; proposed: string }[]): string[] {
+  const checks: string[] = [];
+  for (const k of keep) {
+    const original = k.original.trim();
+    const proposed = k.proposed.trim();
+    if (original.length >= 3 && !replacement.includes(original)) checks.push(`Changed wording you kept: “${clipQuote(original)}”`);
+    else if (!original && proposed.length >= 6 && replacement.includes(proposed)) checks.push(`Re-added text you removed: “${clipQuote(proposed)}”`);
+  }
+  return checks;
+}

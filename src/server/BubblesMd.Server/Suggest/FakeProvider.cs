@@ -4,7 +4,8 @@ namespace BubblesMd.Server.Suggest;
 
 /// <summary>
 /// Zero-cost deterministic fixture provider (Bubbles:Provider = "fake") for mechanical and failure checks through
-/// the real HTTP path. Reflection keywords select behaviour: #slow, #fail, #malformed, #unchanged, #cannot, #delete.
+/// the real HTTP path. Reflection keywords select behaviour: #slow, #fail, #malformed, #unchanged, #cannot, #delete,
+/// #same (no change at first, a real change after the correction) and #stubborn (no change even after correction).
 /// Otherwise it alters the first word, deletes the third word and appends a sentence.
 /// </summary>
 public sealed partial class FakeProvider : ISuggestionProvider
@@ -14,19 +15,28 @@ public sealed partial class FakeProvider : ISuggestionProvider
     [GeneratedRegex(@"\p{L}[\p{L}\p{N}']*")]
     private static partial Regex Word();
 
-    public async Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, CancellationToken ct)
+    public async Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, ChatPrompt prompt, CancellationToken ct)
     {
         var notes = string.Join(' ', (request.Reflections ?? []).Select(r => r.Text));
         var usage = new UsageDto(0, 0, 0, 0m);
+        ModelOutcome Result(string outcome, string replacement, string reason) =>
+            new(outcome, replacement, reason, "fake/fixture", usage, $"{{\"outcome\":\"{outcome}\"}}");
+
         if (notes.Contains("#slow")) await Task.Delay(TimeSpan.FromSeconds(4), ct);
         if (notes.Contains("#fail")) throw new ProviderException("provider_error", "Fixture provider failure (#fail).", 502, "no");
         if (notes.Contains("#malformed"))
             throw new ProviderException("malformed_output", "Fixture malformed output (#malformed). Nothing was applied; use Retry.", 502, "no");
-        if (notes.Contains("#unchanged")) return new ModelOutcome("unchanged", "", "Fixture: already fine.", "fake/fixture", usage);
-        if (notes.Contains("#cannot")) return new ModelOutcome("cannot_apply", "", "Fixture: cannot apply.", "fake/fixture", usage);
-        if (notes.Contains("#delete")) return new ModelOutcome("replace", "", "Fixture: delete the selection.", "fake/fixture", usage);
+        if (notes.Contains("#unchanged")) return Result("unchanged", "", "Fixture: already fine.");
+        if (notes.Contains("#cannot")) return Result("cannot_apply", "", "Fixture: cannot apply.");
+        if (notes.Contains("#delete")) return Result("replace", "", "Fixture: delete the selection.");
 
-        var text = request.Selection ?? "";
+        var baseline = SuggestOrchestrator.Baseline(request);
+        if (notes.Contains("#stubborn") || (notes.Contains("#same") && !prompt.IsCorrection))
+            return Result("replace", baseline, "Fixture: no change.");
+        if (request.Action == "revise")
+            return Result("replace", baseline.TrimEnd() + " Revised.", "Fixture revision.");
+
+        var text = baseline;
         var words = Word().Matches(text).ToList();
         var result = text;
         if (words.Count >= 3)
@@ -43,6 +53,6 @@ public sealed partial class FakeProvider : ISuggestionProvider
         }
         var trailing = result.Length - result.TrimEnd().Length;
         result = result.TrimEnd() + " Fixture addition." + new string(' ', trailing);
-        return new ModelOutcome("replace", result, "Fixture suggestion.", "fake/fixture", usage);
+        return Result("replace", result, "Fixture suggestion.");
     }
 }

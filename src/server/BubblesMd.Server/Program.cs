@@ -65,20 +65,22 @@ app.MapPost("/api/suggest", async (SuggestRequest request, IOptions<BubblesOptio
     var watch = Stopwatch.StartNew();
     try
     {
-        var result = await provider.SuggestAsync(request, mode.Model, ct);
-        watch.Stop();
-        log.LogInformation("Suggest {RequestId} {Action} {Mode} -> {Model} {Outcome} in {Ms} ms; tokens {In}/{Out}/{Reasoning}; cost {Cost}",
-            request.RequestId, request.Action, request.Mode, result.Model, result.Outcome, watch.ElapsedMilliseconds,
-            result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.ReasoningTokens, result.Usage.Cost?.ToString() ?? "unknown");
+        var run = await SuggestOrchestrator.RunAsync(provider, request, mode.Model, ct);
+        var result = run.Result;
+        var usage = SuggestOrchestrator.Sum(run.Attempts);
+        log.LogInformation("Suggest {RequestId} {Action} {Mode} -> {Model} {Outcome} in {Ms} ms over {Attempts} call(s); tokens {In}/{Out}/{Reasoning}; cost {Cost}",
+            request.RequestId, request.Action, request.Mode, result.Model, result.Outcome, run.LatencyMs, run.Attempts.Count,
+            usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.Cost?.ToString() ?? "unknown");
         return Results.Ok(new SuggestResponse(request.RequestId!, request.ReviewId!, request.Revision, result.Outcome,
             result.Outcome == "replace" ? result.Replacement : null,
             string.IsNullOrWhiteSpace(result.Reason) ? null : result.Reason,
-            request.Mode!, result.Model, provider.Name, result.Usage, watch.ElapsedMilliseconds));
+            request.Mode!, result.Model, provider.Name, usage, run.LatencyMs, run.Attempts));
     }
     catch (ProviderException e)
     {
-        log.LogWarning("Suggest {RequestId} failed after {Ms} ms: {Code} {Message}", request.RequestId, watch.ElapsedMilliseconds, e.Code, e.Message);
-        return Results.Json(new ErrorBody(new ErrorDetail(e.Code, e.Message, e.Charged)), statusCode: e.Status);
+        log.LogWarning("Suggest {RequestId} failed after {Ms} ms ({Attempts} completed call(s)): {Code} {Message}",
+            request.RequestId, watch.ElapsedMilliseconds, e.Attempts.Count, e.Code, e.Message);
+        return Results.Json(new ErrorBody(new ErrorDetail(e.Code, e.Message, e.Charged, e.Attempts)), statusCode: e.Status);
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {

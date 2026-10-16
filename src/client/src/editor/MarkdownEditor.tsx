@@ -9,6 +9,7 @@ import type { ChangeKind } from '../core/changes';
 import { diffText, type Hunk } from '../core/textChanges';
 import { KIND_LABEL } from './FormattedEditor';
 import type { DecorationSpec, EditorCallbacks, EditorHandle } from './types';
+import { PLUS_SVG } from '../ui/PlusIcon';
 
 const External = Annotation.define<boolean>();
 
@@ -51,8 +52,9 @@ class MarkerWidget extends WidgetType {
     el.className = this.kind === 'added' ? 'src-insert' : `src-point ${this.kind}`;
     el.dataset.change = this.id;
     el.dataset.kind = this.kind;
-    el.textContent = this.kind === 'added' ? '+' : '◆';
-    el.title = this.kind === 'added' ? 'Added — show the proposed text' : `${KIND_LABEL[this.kind]} — click to keep the original`;
+    if (this.kind === 'added') el.innerHTML = PLUS_SVG;
+    else el.textContent = '◆';
+    el.title = this.kind === 'added' ? 'Added — click to remove this addition' : `${KIND_LABEL[this.kind]} — click to keep the original`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', el.title);
     return el;

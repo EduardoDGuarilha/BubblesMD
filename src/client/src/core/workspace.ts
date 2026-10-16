@@ -2,7 +2,7 @@ import { mapRange, type Hunk } from './textChanges';
 import { effectiveText, type CandidateDiff } from './changes';
 
 export type Mode = 'fast' | 'smart';
-export type SuggestAction = 'initial' | 'refine' | 'refresh';
+export type SuggestAction = 'initial' | 'refine' | 'refresh' | 'revise';
 export type ReviewStatus = 'open' | 'accepted' | 'discarded' | 'targetDeleted';
 
 export interface Thought {
@@ -66,6 +66,10 @@ export interface CandidateVersion {
   latencyMs: number;
   revision: number;
   createdAt: number;
+  /** Provider calls that produced this version (2 when a no-change correction was needed). */
+  attempts?: number;
+  /** Deterministic checks against the writer's keep-original choices (e.g. kept wording that went missing). */
+  checks?: string[];
 }
 
 export const NEAR_CONTEXT = 120;

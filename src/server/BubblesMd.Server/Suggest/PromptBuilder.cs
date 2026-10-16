@@ -3,6 +3,15 @@ using System.Text;
 
 namespace BubblesMd.Server.Suggest;
 
+/// <summary>A chat prompt: system text plus alternating user/assistant turns.</summary>
+public sealed record ChatPrompt(string System, IReadOnlyList<(string Role, string Content)> Turns)
+{
+    public bool IsCorrection => Turns.Count > 1;
+
+    public ChatPrompt WithCorrection(string previousAnswer, string correction) =>
+        this with { Turns = [.. Turns, ("assistant", previousAnswer), ("user", correction)] };
+}
+
 /// <summary>
 /// Builds the model prompt. Document text is fenced with per-request random markers so text inside the
 /// document cannot close a section or pose as instructions; the writer's reflections are the instructions.
@@ -32,7 +41,7 @@ public static class PromptBuilder
         - reason: one short sentence for the writer.
         """;
 
-    public static (string System, string User) Build(SuggestRequest r)
+    public static ChatPrompt Build(SuggestRequest r)
     {
         var tag = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
         string Fence(string name, string? text) => $"<<<{name}_{tag}\n{text ?? ""}\n{name}_{tag}>>>\n";
@@ -43,21 +52,38 @@ public static class PromptBuilder
         sb.Append(Fence("SELECTION", r.Selection));
         sb.Append(Fence("CONTEXT_AFTER", r.ContextAfter));
         AppendWordBoundaryNotes(sb, r.ContextBefore ?? "", r.Selection ?? "", r.ContextAfter ?? "");
+        var reflections = (r.Reflections ?? []).Where(x => !string.IsNullOrWhiteSpace(x.Text)).ToList();
         sb.Append("\nWriter's reflections (instructions):\n");
         var i = 1;
-        foreach (var reflection in (r.Reflections ?? []).Where(x => !string.IsNullOrWhiteSpace(x.Text)))
-            sb.Append($"{i++}. {reflection.Text!.Trim()}\n");
+        foreach (var reflection in reflections)
+            sb.Append($"{i++}. {(reflection.IsNew ? "(new) " : "")}{reflection.Text!.Trim()}\n");
 
         if (r.Prior is { } prior)
         {
             sb.Append('\n');
-            if (r.Action == "refresh")
-                sb.Append("The selected passage changed after the previous suggestion. Write a new suggestion for the current " +
-                          "SELECTION that keeps the intent of the reflections and the keep-original choices.\n");
-            else
-                sb.Append("Improve on the previous suggestion according to the current reflections.\n");
+            switch (r.Action)
+            {
+                case "refresh":
+                    sb.Append("The selected passage changed after the previous suggestion. Write a new suggestion for the current " +
+                              "SELECTION that keeps the intent of the reflections and the keep-original choices.\n");
+                    break;
+                case "revise":
+                    sb.Append("The writer reviewed the previous suggestion edit by edit and kept the original wording for some " +
+                              "proposed edits (listed below). CURRENT_PROPOSAL is the selection with only the remaining edits " +
+                              "applied, so it may now read awkwardly where edits were reverted. Repair grammar, agreement and flow " +
+                              "with the smallest changes possible. Keep every keep-original phrase exactly as it is and do not " +
+                              "reintroduce any rejected proposal. If CURRENT_PROPOSAL already reads well, answer \"unchanged\".\n");
+                    break;
+                default:
+                    sb.Append(reflections.Any(x => x.IsNew)
+                        ? "The writer added or changed the reflections marked (new) after reading CURRENT_PROPOSAL. Rewrite " +
+                          "CURRENT_PROPOSAL so that it clearly satisfies them while keeping the earlier reflections and the " +
+                          "keep-original choices.\n"
+                        : "Improve CURRENT_PROPOSAL according to the reflections, keeping the keep-original choices.\n");
+                    break;
+            }
             sb.Append(Fence("PREVIOUS_SOURCE", prior.Source));
-            sb.Append(Fence("PREVIOUS_SUGGESTION", prior.Candidate));
+            sb.Append(Fence("CURRENT_PROPOSAL", prior.Candidate));
             var keep = prior.KeepOriginal ?? [];
             if (keep.Count > 0)
             {
@@ -66,7 +92,23 @@ public static class PromptBuilder
                     sb.Append(Fence("KEEP_ORIGINAL", k.Original) + Fence("REJECTED_PROPOSAL", k.Proposed));
             }
         }
-        return (System, sb.ToString());
+        return new ChatPrompt(System, [("user", sb.ToString())]);
+    }
+
+    /// <summary>The single corrective turn sent after a response that made no change.</summary>
+    public static string Correction(SuggestRequest r)
+    {
+        var target = r.Action == "refine" ? "CURRENT_PROPOSAL" : "SELECTION";
+        var asked = (r.Reflections ?? []).Where(x => !string.IsNullOrWhiteSpace(x.Text)).ToList();
+        var fresh = asked.Where(x => x.IsNew).ToList();
+        var list = string.Join("; ", (fresh.Count > 0 ? fresh : asked).Select(x => $"\"{x.Text!.Trim()}\""));
+        return $"""
+            Your previous answer made no change to {target}, but the writer asked for a change: {list}.
+            Write a meaningful revision of {target} that addresses what those reflections ask for (for example, if a
+            reflection says the text is too verbose, make it substantially more concise). Do not make arbitrary or merely
+            cosmetic changes just to differ. If no honest revision is possible without breaking the writer's constraints,
+            answer "cannot_apply" with a short reason. Answer with the same JSON format.
+            """;
     }
 
     /// <summary>Selections that cut through a word are easy to mis-handle; state the fragment explicitly.</summary>

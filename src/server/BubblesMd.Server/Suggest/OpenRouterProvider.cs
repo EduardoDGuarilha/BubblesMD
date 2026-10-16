@@ -9,7 +9,7 @@ namespace BubblesMd.Server.Suggest;
 public interface ISuggestionProvider
 {
     string Name { get; }
-    Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, CancellationToken ct);
+    Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, ChatPrompt prompt, CancellationToken ct);
 }
 
 /// <summary>OpenRouter chat completions with a JSON-schema outcome. No retries and no model fallback.</summary>
@@ -37,19 +37,16 @@ public sealed class OpenRouterProvider(HttpClient http, IOptions<BubblesOptions>
         }
         """)!;
 
-    public async Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, CancellationToken ct)
+    public async Task<ModelOutcome> SuggestAsync(SuggestRequest request, string model, ChatPrompt prompt, CancellationToken ct)
     {
         var key = keys.Resolve() ?? throw new ProviderException("key_missing",
             $"The OpenRouter key is not configured on the server ({KeyResolver.EnvName}).", 503, "no");
-        var (system, user) = PromptBuilder.Build(request);
+        var messages = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = prompt.System } };
+        foreach (var (role, content) in prompt.Turns) messages.Add(new JsonObject { ["role"] = role, ["content"] = content });
         var body = new JsonObject
         {
             ["model"] = model,
-            ["messages"] = new JsonArray
-            {
-                new JsonObject { ["role"] = "system", ["content"] = system },
-                new JsonObject { ["role"] = "user", ["content"] = user },
-            },
+            ["messages"] = messages,
             ["max_tokens"] = options.Value.MaxOutputTokens,
             ["response_format"] = ResponseFormat.DeepClone(),
         };
@@ -154,7 +151,7 @@ public static partial class OpenRouterParser
 
         var model = root["model"]?.ToString();
         return new ModelOutcome(outcome, outcome == "replace" ? replacement! : "", reason,
-            string.IsNullOrWhiteSpace(model) ? requestedModel : model, usage);
+            string.IsNullOrWhiteSpace(model) ? requestedModel : model, usage, content);
     }
 
     private static ProviderException Malformed(string message) =>
