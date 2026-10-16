@@ -198,8 +198,7 @@ tests).
 
 ## Credits
 
-- **Pop sound.** `src/client/public/sounds/bubble-pop.mp3` is byte-identical to a file Eduardo supplied as
-  `universfield-bubble-pop-02-293341.mp3`. The name suggests "Bubble Pop 02" by Universfield; the file carries no
-  metadata and no license text is included.
-  - **Before publishing:** confirm the source page and its license terms, or remove the file. The app then falls back
-    to a synthesized pop.
+- **Pop sound:** [Bubble Pop 02](https://pixabay.com/sound-effects/film-special-effects-bubble-pop-02-293341/) by
+  Universfield, supplied by Eduardo and used for the app's pop
+  interaction under the [Pixabay Content License](https://pixabay.com/service/license-summary/).
+  See [third-party notices](THIRD_PARTY_NOTICES.md) for the asset path and license references.
