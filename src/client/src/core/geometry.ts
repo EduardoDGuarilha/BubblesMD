@@ -344,7 +344,22 @@ export function placeMarkers(anchors: MarkerAnchor[], width: number, size: Marke
 export const markerRect = (m: { x: number; top: number }, size: MarkerSize = MARKER): Rect => ({ x: m.x, y: m.top, w: size.w, h: size.h });
 export const markerZone = (m: { x: number; top: number }, size: MarkerSize = MARKER): Rect => envelope(markerRect(m, size), MOTION.markerHover);
 
-export const FAMILY = { min: 236, max: 548, gap: 14, right: 10, edge: 8 };
+export const FAMILY = { min: 236, max: 548, gap: 14, right: 10, edge: 8, inset: 12 };
+
+/**
+ * Where the expanded family is drawn, in track (rail) coordinates, for its natural top: CSS `position: sticky` with
+ * `FAMILY.inset` at the top and bottom of the visible area, inside a track of `trackHeight`. Mirrors the browser:
+ * the bottom constraint shifts the box up (not above the track start), then the top constraint shifts it down (not
+ * past the track end), so the top inset wins when the family does not fit.
+ */
+export function clampFamilyTop(natural: number, height: number, visTop: number, visBottom: number, trackHeight = Infinity): number {
+  let top = natural;
+  const bottomLimit = visBottom - FAMILY.inset - height;
+  if (top > bottomLimit) top = Math.max(bottomLimit, Math.min(natural, 0));
+  const topLimit = visTop + FAMILY.inset;
+  if (top < topLimit) top = Math.max(top, Math.min(topLimit, trackHeight - height));
+  return top;
+}
 
 /** The widest marker footprint the rail can give clusters while still fitting a family of minimum width beside them. */
 export const clusterWidth = (railWidth: number, size: MarkerSize = MARKER) =>

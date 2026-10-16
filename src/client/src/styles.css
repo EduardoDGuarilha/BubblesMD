@@ -861,10 +861,25 @@ button:disabled {
 
 /* ---------- review family ---------- */
 
-/* Left, width and top are measured: beside the clusters of minimized reviews (core/geometry.ts placeFamily). */
-.family {
+/*
+ * The family sits in a full-height track in the rail as a sticky box: its natural top (beside the passage), left
+ * and width are measured (ReviewLayer, core/geometry.ts placeFamily); the browser keeps it within FAMILY.inset of
+ * the visible area's edges on every scrolled frame (clampFamilyTop mirrors that rule).
+ */
+.family-track {
   position: absolute;
-  left: 84px;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Until its first placement the family is transparent (still focusable), so it never shows at the rail origin. */
+.family:not(.docked):not([data-placed]) {
+  opacity: 0;
+}
+
+.family {
+  position: sticky;
   width: min(calc(100% - 96px), 548px);
   padding: 4px 8px 14px;
   overflow-x: hidden;

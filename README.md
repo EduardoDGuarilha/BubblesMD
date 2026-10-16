@@ -153,7 +153,7 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 ## Verification performed
 
 Automated:
-- **Vitest (44):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document; 9 in the change-marking pass: boundaries, saved-version compatibility, Markdown around markers, deletion markers)
+- **Vitest (45):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document; 9 in the change-marking pass: boundaries, saved-version compatibility, Markdown around markers, deletion markers; 1 in the scrolling pass: the sticky clamp rule)
   - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
     lists, Markdown-looking code, cross-block selections, loud failure.
   - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
@@ -342,6 +342,53 @@ Verified:
   renderer cases for bold, emphasis and strikethrough links, partially changed bold, the listed fallback, and
   deletion markers), xUnit 14/14.
 
+**Selection and scrolling pass of 2026-10-16** (scroll jump on creation, missing "+ Bubble", clamped-scroll lag).
+
+Causes fixed:
+- **Scroll jump.** The first reflection was focused (plain `focus()`) before the new family had a position, so the
+  browser scrolled toward the top of the rail. It now focuses with `preventScroll`. The family is placed before the
+  first paint and stays transparent until then.
+- **Missing "+ Bubble".** The just-used range stayed suppressed forever. Suppression now lasts only while that
+  selection is unchanged: it is cleared by a new pointer gesture, a different selection, a new document, an edit or a
+  view switch.
+- **Clamped-scroll lag.** A family clamped to the viewport was repositioned only after a React round trip (one frame
+  late, 4 px per frame in the investigation).
+  - The family is now `position: sticky` in a full-height track. A spacer holds its natural top; a margin would stop
+    sticky from moving it up.
+  - The browser applies the clamp on every scrolled frame.
+  - One placement function, run after each render and from the scroll event, keeps cached geometry and redraws the
+    connection with the same clamp rule (`clampFamilyTop`).
+  - Scrolling no longer re-measures every review.
+
+Verified in the real editor (disposable 36-paragraph document, fixture provider, saving switched off at runtime):
+- **Sticky gate, before the rest of the refactor.**
+  - The first arrangement, with a margin-based natural top, never bottom-clamped. It was corrected to a spacer.
+  - Then `clampFamilyTop` matched the rendered position within 0.13 px over 263 scroll offsets each for a
+    mid-document review, a review at the document end and a tall family. Within 0.5 px after resizes and with a grown
+    reflection (whole-pixel snapping).
+  - Both clamps occurred.
+  - Inputs, controls, markers, document selection and outside-click minimize worked through the
+    `pointer-events: none` track.
+- **Per-frame scrolling** (4 px and 20 px per frame, plus a tall family and Markdown view), each frame read, then
+  forced through a full React placement and read again:
+  - 0 delayed family corrections in 650 frames;
+  - dots identical within 0.1 px;
+  - markers never moved;
+  - unclamped, the family kept its offset to the passage.
+- **Creation at the document end, Formatted and Markdown:**
+  - `scrollTop` is unchanged at the focus call, at `focusin` and after settling (3398 and 3401);
+  - the family sits 30 px above its passage, in view, without "Back to passage";
+  - the reflection is focused.
+- **Dismissal:**
+  - right after creation the unchanged selection stays suppressed;
+  - create → Undo and create → pop, then reselect the same range: the action shows, by pointer and by Shift+arrows,
+    in both views;
+  - a new document with the same offsets, a source edit and a view switch carry no suppression;
+  - a control (the same range, nothing in between) stays suppressed.
+- **Short regression:** Enter refinement (one call, one step), Back to passage, Undo, title dialog, recovery on
+  reload, sound, spend.
+- **Tests:** Vitest 45/45 (added: the sticky clamp rule), xUnit 14/14.
+
 ## Known limitations
 
 - Very large documents are serialized and diffed on every Formatted keystroke; this is fine for typical documents and
@@ -359,6 +406,12 @@ Verified:
 - In rare cases a change cannot be marked inline without changing how the Markdown renders, for example punctuation
   added directly against `**[link](…)**`. It is then listed under the suggestion by its text ("Not marked inline")
   instead of being highlighted in place. It stays paired with the source and poppable.
+- The connection dots are drawn from the scroll event, not by CSS. When the browser scrolls on its compositor thread
+  faster than the page produces frames, the dots can trail by a frame while the family itself (CSS sticky) cannot.
+  JavaScript can't observe those compositor frames. The tool's wheel scrolling moves in large steps, so smooth wheel
+  scrolling was not sampled frame by frame.
+- The sticky track's lower limit (a family that would extend past the end of the rail) could not be reached: the
+  rail always extends past the last passage. The clamp rule models it, but untested.
 - The selection action hides when a selection is taller than the visible area (neither above nor below fits);
   Ctrl/Cmd+Alt+M still works.
 - Thought dots are recomputed on every layout pass but do not follow the ±1.5 px float exactly.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   chainDots,
+  clampFamilyTop,
   CLUSTER,
   COARSE_MARKER,
   connectDots,
@@ -158,5 +159,15 @@ describe('family and selection action placement', () => {
     const edge = placeSelectionAction([{ x: 560, y: 300, w: 40, h: 26 }], bounds, { w: 90, h: 28 })!;
     expect(edge.x + 90).toBeLessThanOrEqual(600);
     expect(placeSelectionAction(lines, { ...bounds, top: 180, bottom: 270 }, { w: 90, h: 28 })).toBeNull();
+  });
+});
+
+describe('sticky family clamp', () => {
+  it('keeps the natural top in view, clamps at both edges, and lets the top inset win when it does not fit', () => {
+    expect(clampFamilyTop(300, 200, 0, 800)).toBe(300);
+    expect(clampFamilyTop(300, 200, 400, 1200)).toBe(412);
+    expect(clampFamilyTop(900, 200, 0, 800)).toBe(588);
+    expect(clampFamilyTop(500, 900, 400, 1200)).toBe(412);
+    expect(clampFamilyTop(300, 200, 2000, 2800, 2100)).toBe(1900);
   });
 });

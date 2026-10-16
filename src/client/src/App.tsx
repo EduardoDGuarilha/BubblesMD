@@ -180,6 +180,17 @@ function Workspace({
   const [bridgeError, setBridgeError] = useState<string | null>(null);
   const frame = useRef(0);
 
+  // Scrolling only re-measures the selection action; the review space follows the scroll itself (ReviewLayer).
+  const [scrollTick, setScrollTick] = useState(0);
+  const scrollFrame = useRef(0);
+  const bumpScroll = useCallback(() => {
+    if (scrollFrame.current) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = 0;
+      setScrollTick((t) => t + 1);
+    });
+  }, []);
+
   const bump = useCallback(() => {
     if (frame.current) return;
     frame.current = requestAnimationFrame(() => {
@@ -242,6 +253,8 @@ function Workspace({
   }, []);
   const onSelectionChange = useCallback(() => {
     bump();
+    // The suppression after creating a bubble covers only that unchanged selection.
+    if (dismissedKey.current && selectionKey() !== dismissedKey.current) dismissedKey.current = null;
     if (settleTimer.current) clearTimeout(settleTimer.current);
     if (!dragging.current) settleTimer.current = setTimeout(settleSelection, 250);
   }, [bump, settleSelection]);
@@ -353,8 +366,14 @@ function Workspace({
     setSelAction((prev) =>
       prev === next || (prev && next && prev.x === next.x && prev.y === next.y && prev.key === next.key && prev.below === next.below) ? prev : next,
     );
-    // tick: scroll, resize, reflow, editor transactions and selection changes; settle: a selection came to rest.
-  }, [tick, settle, md, view, narrow]);
+    // tick: resize, reflow, editor transactions and selection changes; scrollTick: scrolling; settle: a selection
+    // came to rest.
+  }, [tick, scrollTick, settle, md, view, narrow]);
+
+  // A new document, a source edit or a view switch never inherits a suppressed selection from before.
+  useEffect(() => {
+    dismissedKey.current = null;
+  }, [state.doc.id, md, view]);
 
   // Hover/focus pairing: the matching source and suggestion targets of one review highlight together through a
   // scoped style rule (no connector line, no overlay, and no mutation of editor-owned DOM).
@@ -481,7 +500,7 @@ function Workspace({
       <main
         className="workspace"
         ref={scrollerRef}
-        onScroll={bump}
+        onScroll={bumpScroll}
         onPointerDown={(e) => {
           if (!store.state.expanded) return;
           const t = e.target as HTMLElement;
@@ -494,8 +513,10 @@ function Workspace({
           <div
             className="document"
             onPointerDown={() => {
+              // A new pointer selection gesture: it may intentionally select a range used before.
               dragging.current = true;
               settledKey.current = null;
+              dismissedKey.current = null;
               setSelAction(null);
             }}
           >

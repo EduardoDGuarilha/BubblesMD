@@ -141,3 +141,29 @@ transcription (the boundary words match the screenshots).
 - A review saved before the fix reloaded with corrected kinds, its pop kept, identical text and no request.
 - Real-editor measurements and a regression pass, as listed in the README. Exact candidate texts were injected through
   a dev-console stub of the suggest function; no paid calls.
+
+## 2026-10-16: selection and scrolling pass
+
+**Causes** (from a forked investigation, reproduced in the real editor):
+- A plain `focus()` on the first reflection before the family was placed made the browser scroll toward the top of
+  the rail.
+- The dismissed selection key was never cleared.
+- A clamped family followed scrolling one React round trip late.
+
+**Changes:**
+- `focus({ preventScroll: true })`, and the family stays transparent until placed.
+- Temporary dismissal.
+- The family is sticky in a full-height track, with a spacer for its natural top.
+- One placement owner (full after renders, scroll from the scroll event) with `clampFamilyTop`, validated against the
+  rendered sticky position.
+- Scrolling no longer re-measures reviews.
+
+**Checks:**
+- Validation gate first: the margin-based arrangement failed the bottom clamp and was corrected.
+- Then:
+  - 0 delayed corrections in 650 measured frames;
+  - dots within 0.1 px;
+  - creation at the end keeps `scrollTop` in both views;
+  - dismissal lifecycle by pointer and keyboard in both views;
+  - regressions.
+- Vitest 45/45, xUnit 14/14.

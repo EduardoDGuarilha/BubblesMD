@@ -535,7 +535,8 @@ function NewThought({
     else if (submit) onSubmit(text);
     else onCommit(text);
   };
-  useEffect(() => ref.current?.focus(), []);
+  // Without preventScroll the browser would scroll toward the family before it is placed beside its passage.
+  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
   return (
     <section
       className="bubble thought new pending chain-item"
