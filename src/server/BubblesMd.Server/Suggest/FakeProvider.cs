@@ -35,8 +35,6 @@ public sealed partial class FakeProvider : ISuggestionProvider
         var baseline = SuggestOrchestrator.Baseline(request);
         if (notes.Contains("#stubborn") || (notes.Contains("#same") && !prompt.IsCorrection))
             return Result("replace", baseline, "Fixture: no change.");
-        if (request.Action == "revise")
-            return Result("replace", baseline.TrimEnd() + " Revised.", "Fixture revision.");
 
         var text = baseline;
         var words = Word().Matches(text).ToList();

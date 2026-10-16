@@ -2,7 +2,7 @@ import { mapRange, type Hunk } from './textChanges';
 import { effectiveText, type CandidateDiff } from './changes';
 
 export type Mode = 'fast' | 'smart';
-export type SuggestAction = 'initial' | 'refine' | 'refresh' | 'revise';
+export type SuggestAction = 'initial' | 'refine' | 'refresh';
 export type ReviewStatus = 'open' | 'accepted' | 'discarded' | 'targetDeleted';
 
 export interface Thought {

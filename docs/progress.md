@@ -79,3 +79,39 @@ pane, CSS animations and ResizeObserver callbacks were throttled, so geometry wa
 plus the motion envelope; a window-resize re-layout was added for robustness.
 
 **AI usage:** $0.00038 across 2 live Fast calls.
+
+## 2026-10-16: interaction pass (clusters, connections, peek, highlights, +, selection action, Revise removed, title)
+
+**Causes:**
+- Opening a review reshuffled the markers because the open review was left out of marker placement, so the others
+  re-slotted. Also, the open review's insertion + takes inline width and re-wrapped a line, which moved later
+  anchors and regrouped clusters (found while checking the fix).
+- Fixed two-column slots made the grid look.
+- Hover drew SVG rectangles over the already rounded decorations, so the outline appeared offset and duplicated
+  (worst on wrapped text).
+- The inline + sat low because an inline-grid takes its baseline from the SVG's bottom. In Markdown view the widget
+  also sits outside the enlarged `#` heading token.
+- "+ Bubble" lived in the rail.
+- With a coarse pointer the markers are 44 × 44 while placement assumed 34 × 24 (found at 390 px).
+
+**Changes:**
+- Clusters: honeycomb packing per local cluster, every review kept, and minimized measurements kept while one is open.
+- Family placement separate and beside the clusters.
+- Connections: passage first, then the active miniature (straight or one bend), else no dots.
+- Scoped style rules for the change ring and the passage peek.
+- The + is a baseline-aligned, one-line-tall box; in Markdown it takes the size of its token.
+- Contextual selection action.
+- Try again.
+- Revise removed (client, server, prompt, fixture, tests, docs).
+- Title → start page through the New confirmation, with `closeDocument` persisting the start page.
+
+**Checks:** Vitest 35/35 and xUnit 14/14. In the real editor, the five-nearby-reviews case:
+- identical marker positions minimized, while each is open and after minimizing;
+- every review connected (four from their miniature, one from the passage);
+- 0 overlaps and 0 dot contacts at 1440, at 1024 (also scrolled) and at 390;
+- peek per marker by hover and focus, overlapping reviews distinct, no request;
+- a wrapped deletion ringed per line with no layout shift;
+- + centre within 1 px of the text centre (paragraph, bold, heading, Markdown);
+- the selection action by mouse, drag, keyboard and Tab+Enter, at the edges, and after scroll and resize;
+- title Cancel / Leave with a request in flight (cancelled, kept in spend), with reload staying on the start page;
+- regressions: Enter submission, pop, Accept/Undo/Redo, Markdown, sound decode.

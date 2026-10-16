@@ -27,14 +27,13 @@ public sealed record OrchestratedResult(ModelOutcome Result, List<AttemptDto> At
 
 /// <summary>
 /// Runs one suggestion request. If the model makes no change where the writer asked for one, it makes exactly one
-/// corrective call with the same model and context; both calls are reported so their cost is counted. Revise may
-/// legitimately find nothing to repair, so it is never corrected.
+/// corrective call with the same model and context; both calls are reported so their cost is counted.
 /// </summary>
 public static class SuggestOrchestrator
 {
-    /// <summary>What a result must differ from: the effective proposal for refine/revise, otherwise the selection.</summary>
+    /// <summary>What a result must differ from: the effective proposal for refine, otherwise the selection.</summary>
     public static string Baseline(SuggestRequest r) =>
-        r.Action is "refine" or "revise" && r.Prior?.Candidate is { } candidate ? candidate : r.Selection ?? "";
+        r.Action == "refine" && r.Prior?.Candidate is { } candidate ? candidate : r.Selection ?? "";
 
     public static bool MadeNoChange(SuggestRequest r, ModelOutcome o) =>
         o.Outcome == "unchanged" || (o.Outcome == "replace" && TextCompare.IsUnchanged(Baseline(r), o.Replacement));
@@ -47,7 +46,7 @@ public static class SuggestOrchestrator
 
         var first = await Timed(provider, request, model, prompt, ct);
         attempts.Add(first.Attempt);
-        if (request.Action == "revise" || !MadeNoChange(request, first.Result))
+        if (!MadeNoChange(request, first.Result))
             return new OrchestratedResult(first.Result, attempts, total.ElapsedMilliseconds);
 
         var corrected = prompt.WithCorrection(first.Result.RawContent, PromptBuilder.Correction(request));

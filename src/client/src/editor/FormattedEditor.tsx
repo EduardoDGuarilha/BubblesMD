@@ -7,7 +7,7 @@ import { buildBridge, type Bridge } from '../core/bridge';
 import { diffText } from '../core/textChanges';
 import type { ChangeKind } from '../core/changes';
 import { formattedExtensions, parseMarkdown, serializeDoc } from './markdownModel';
-import type { DecorationSpec, EditorCallbacks, EditorHandle } from './types';
+import { textRects, type DecorationSpec, type EditorCallbacks, type EditorHandle } from './types';
 import { PLUS_SVG } from '../ui/PlusIcon';
 
 const EXTERNAL = 'bubblesExternal';
@@ -173,6 +173,13 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
       if (!bridge.ok) {
         bridgeErrorRef.current(bridge.error ?? 'Formatted view could not map this document.');
       } else {
+        // Invisible passage anchors for every open review (highlighted from a scoped style rule, never by DOM edits).
+        for (const a of spec.anchors) {
+          const from = bridge.mdToPm(a.from, 'start');
+          const to = bridge.mdToPm(a.to, 'end');
+          if (from < to) decorations.push(Decoration.inline(from, to, { class: `rt rt-${a.id}` }));
+        }
+        const review = spec.reviewId ?? '';
         if (spec.target) {
           const from = bridge.mdToPm(spec.target.from, 'start');
           const to = bridge.mdToPm(spec.target.to, 'end');
@@ -186,6 +193,7 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
             decorations.push(
               Decoration.inline(from, to, {
                 class: `src-change ${c.kind}`,
+                'data-review': review,
                 'data-change': c.id,
                 'data-kind': c.kind,
                 title: `${label} — click to keep the original wording`,
@@ -194,7 +202,7 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
           } else {
             const pos = c.kind === 'added' ? bridge.mdToPm(c.from, 'end') : from;
             decorations.push(
-              Decoration.widget(pos, () => sourceMarker(c.id, c.kind), { side: 1, key: `${c.id}-${c.kind}`, ignoreSelection: true }),
+              Decoration.widget(pos, () => sourceMarker(review, c.id, c.kind), { side: 1, key: `${review}-${c.id}-${c.kind}`, ignoreSelection: true }),
             );
           }
         }
@@ -228,6 +236,21 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
         return { top: start.top, bottom: Math.max(end.bottom, start.bottom), left: start.left, right: end.right };
       } catch {
         return null;
+      }
+    },
+    selectionRects() {
+      const view = editorRef.current?.view;
+      if (!view || view.state.selection.empty) return [];
+      const { from, to } = view.state.selection;
+      try {
+        const a = view.domAtPos(from);
+        const b = view.domAtPos(to);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        range.setEnd(b.node, b.offset);
+        return textRects(range);
+      } catch {
+        return [];
       }
     },
     scrollTo(offset) {
@@ -264,9 +287,10 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
   return <div ref={hostRef} className="editor-host formatted" />;
 });
 
-function sourceMarker(id: string, kind: ChangeKind): HTMLElement {
+function sourceMarker(reviewId: string, id: string, kind: ChangeKind): HTMLElement {
   const el = document.createElement('span');
   el.className = kind === 'added' ? 'src-insert' : `src-point ${kind}`;
+  el.dataset.review = reviewId;
   el.dataset.change = id;
   el.dataset.kind = kind;
   if (kind === 'added') el.innerHTML = PLUS_SVG;

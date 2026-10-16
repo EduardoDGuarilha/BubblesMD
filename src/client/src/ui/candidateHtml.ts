@@ -43,18 +43,20 @@ function sanitize(root: HTMLElement) {
   }
 }
 
-function changeEl(doc: Document, g: ChangeGroup, text: string): HTMLElement {
+function changeEl(doc: Document, reviewId: string, g: ChangeGroup, text: string): HTMLElement {
   const el = doc.createElement('span');
   el.className = `cand-change ${g.kind}`;
+  el.dataset.review = reviewId;
   el.dataset.change = g.id;
   el.dataset.kind = g.kind;
   el.textContent = text;
   return el;
 }
 
-function markerEl(doc: Document, g: ChangeGroup, symbol: string, extra: string): HTMLElement {
+function markerEl(doc: Document, reviewId: string, g: ChangeGroup, symbol: string, extra: string): HTMLElement {
   const el = doc.createElement('span');
   el.className = `cand-marker ${g.kind} ${extra}`;
+  el.dataset.review = reviewId;
   el.dataset.change = g.id;
   el.dataset.kind = g.kind;
   el.textContent = symbol;
@@ -65,8 +67,9 @@ function markerEl(doc: Document, g: ChangeGroup, symbol: string, extra: string):
  * Render the candidate (after pops) with every live change group wrapped in a pop target. Groups are marked
  * with private-use sentinels before Markdown rendering, so a change may cross formatting boundaries; groups
  * that end up with no visible text (e.g. a pure syntax change) get a small marker. `raw` shows the Markdown source.
+ * Every pop target carries `data-review` with `data-change`, since change ids are only unique within a review.
  */
-export function renderCandidate(diff: CandidateDiff, popped: readonly string[], raw: boolean): { root: HTMLElement; groups: ChangeGroup[] } {
+export function renderCandidate(diff: CandidateDiff, popped: readonly string[], raw: boolean, reviewId = ''): { root: HTMLElement; groups: ChangeGroup[] } {
   const byId = new Map(diff.groups.map((g) => [g.id, g]));
   const live: ChangeGroup[] = [];
   let text = '';
@@ -115,7 +118,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
     const flush = () => {
       if (!buffer) return;
       if (current) {
-        frag.append(changeEl(doc, current, buffer));
+        frag.append(changeEl(doc, reviewId, current, buffer));
         withText.add(current.id);
       } else frag.append(doc.createTextNode(buffer));
       buffer = '';
@@ -127,7 +130,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
         if (g) {
           seen.add(g.id);
           if (expectIndex === 'point')
-            frag.append(g.kind === 'deleted' ? markerEl(doc, g, '', 'gap') : markerEl(doc, g, g.replacement.includes('\n') ? '↵' : '␣', 'ws'));
+            frag.append(g.kind === 'deleted' ? markerEl(doc, reviewId, g, '', 'gap') : markerEl(doc, reviewId, g, g.replacement.includes('\n') ? '↵' : '␣', 'ws'));
           else current = g;
         }
         expectIndex = null;
@@ -140,7 +143,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
       }
       if (ch === END) {
         flush();
-        if (current && !withText.has(current.id)) frag.append(markerEl(doc, current, '◆', 'format'));
+        if (current && !withText.has(current.id)) frag.append(markerEl(doc, reviewId, current, '◆', 'format'));
         current = null;
         continue;
       }
@@ -157,7 +160,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
     const p = doc.createElement('p');
     p.className = 'cand-unseen';
     p.append('Changed link or formatting: ');
-    for (const g of unseen) p.append(markerEl(doc, g, '◆', 'format'));
+    for (const g of unseen) p.append(markerEl(doc, reviewId, g, '◆', 'format'));
     root.append(p);
   }
   for (const el of root.querySelectorAll<HTMLElement>('[data-change]')) {

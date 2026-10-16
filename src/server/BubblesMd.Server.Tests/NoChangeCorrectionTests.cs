@@ -67,12 +67,9 @@ public class NoChangeCorrectionTests
     }
 
     [Fact]
-    public async Task Revise_that_finds_nothing_to_repair_is_not_corrected()
+    public void The_removed_revise_action_is_rejected()
     {
-        const string proposal = "We will collect their feedback after each session.";
-        var provider = new ScriptedProvider(_ => Replace(proposal));
-        var run = await SuggestOrchestrator.RunAsync(provider, Refine(proposal) with { Action = "revise" }, "m", CancellationToken.None);
-        Assert.Single(run.Attempts);
+        Assert.Contains(SuggestLimits.Validate(Refine("p") with { Action = "revise" }), e => e.StartsWith("action must be"));
     }
 
     [Fact]

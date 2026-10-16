@@ -8,7 +8,7 @@ import { tags } from '@lezer/highlight';
 import type { ChangeKind } from '../core/changes';
 import { diffText, type Hunk } from '../core/textChanges';
 import { KIND_LABEL } from './FormattedEditor';
-import type { DecorationSpec, EditorCallbacks, EditorHandle } from './types';
+import { textRects, type DecorationSpec, type EditorCallbacks, type EditorHandle } from './types';
 import { PLUS_SVG } from '../ui/PlusIcon';
 
 const External = Annotation.define<boolean>();
@@ -39,17 +39,19 @@ const decorationField = StateField.define<DecorationSet>({
 
 class MarkerWidget extends WidgetType {
   constructor(
+    readonly reviewId: string,
     readonly id: string,
     readonly kind: ChangeKind,
   ) {
     super();
   }
   eq(other: MarkerWidget) {
-    return other.id === this.id && other.kind === this.kind;
+    return other.reviewId === this.reviewId && other.id === this.id && other.kind === this.kind;
   }
   toDOM() {
     const el = document.createElement('span');
     el.className = this.kind === 'added' ? 'src-insert' : `src-point ${this.kind}`;
+    el.dataset.review = this.reviewId;
     el.dataset.change = this.id;
     el.dataset.kind = this.kind;
     if (this.kind === 'added') el.innerHTML = PLUS_SVG;
@@ -57,6 +59,16 @@ class MarkerWidget extends WidgetType {
     el.title = this.kind === 'added' ? 'Added — click to remove this addition' : `${KIND_LABEL[this.kind]} — click to keep the original`;
     el.setAttribute('role', 'button');
     el.setAttribute('aria-label', el.title);
+    if (this.kind === 'added') {
+      // Syntax styling enlarges only the text token (e.g. a heading); take the size of the text this marker follows,
+      // so its circle stays centred on that text, as in Formatted view.
+      requestAnimationFrame(() => {
+        let text = el.previousSibling;
+        while (text && text.nodeName === 'IMG') text = text.previousSibling; // CodeMirror's widget buffers
+        while (text && text.nodeType !== Node.TEXT_NODE) text = text.lastChild;
+        if (text?.parentElement && text.parentElement !== el.parentElement) el.style.fontSize = getComputedStyle(text.parentElement).fontSize;
+      });
+    }
     return el;
   }
   ignoreEvent() {
@@ -161,6 +173,21 @@ export const MarkdownEditor = forwardRef<EditorHandle, Props>(function MarkdownE
       if (!a) return null;
       return { top: a.top, bottom: Math.max(b?.bottom ?? a.bottom, a.bottom), left: a.left, right: b?.right ?? a.right };
     },
+    selectionRects() {
+      const view = viewRef.current;
+      if (!view || view.state.selection.main.empty) return [];
+      const { from, to } = view.state.selection.main;
+      try {
+        const a = view.domAtPos(from);
+        const b = view.domAtPos(to);
+        const range = document.createRange();
+        range.setStart(a.node, a.offset);
+        range.setEnd(b.node, b.offset);
+        return textRects(range);
+      } catch {
+        return [];
+      }
+    },
     scrollTo(offset) {
       const view = viewRef.current;
       if (!view) return;
@@ -180,6 +207,11 @@ export const MarkdownEditor = forwardRef<EditorHandle, Props>(function MarkdownE
 function buildDecorations(spec: DecorationSpec, length: number): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const clamp = (n: number) => Math.max(0, Math.min(n, length));
+  const review = spec.reviewId ?? '';
+  // Invisible passage anchors for every open review (highlighted from a scoped style rule, never by DOM edits).
+  for (const a of spec.anchors) {
+    if (clamp(a.from) < clamp(a.to)) ranges.push(Decoration.mark({ class: `rt rt-${a.id}` }).range(clamp(a.from), clamp(a.to)));
+  }
   if (spec.target && spec.target.from < spec.target.to) {
     ranges.push(Decoration.mark({ class: 'src-target' }).range(clamp(spec.target.from), clamp(spec.target.to)));
   }
@@ -188,11 +220,11 @@ function buildDecorations(spec: DecorationSpec, length: number): DecorationSet {
       ranges.push(
         Decoration.mark({
           class: `src-change ${c.kind}`,
-          attributes: { 'data-change': c.id, 'data-kind': c.kind, title: `${KIND_LABEL[c.kind]} — click to keep the original wording` },
+          attributes: { 'data-review': review, 'data-change': c.id, 'data-kind': c.kind, title: `${KIND_LABEL[c.kind]} — click to keep the original wording` },
         }).range(clamp(c.from), clamp(c.to)),
       );
     } else {
-      ranges.push(Decoration.widget({ widget: new MarkerWidget(c.id, c.kind), side: 1 }).range(clamp(c.from)));
+      ranges.push(Decoration.widget({ widget: new MarkerWidget(review, c.id, c.kind), side: 1 }).range(clamp(c.from)));
     }
   }
   return Decoration.set(ranges, true);

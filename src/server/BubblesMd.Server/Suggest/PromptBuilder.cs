@@ -68,13 +68,6 @@ public static class PromptBuilder
                     sb.Append("The selected passage changed after the previous suggestion. Write a new suggestion for the current " +
                               "SELECTION that keeps the intent of the reflections and the keep-original choices.\n");
                     break;
-                case "revise":
-                    sb.Append("The writer reviewed the previous suggestion edit by edit and kept the original wording for some " +
-                              "proposed edits (listed below). CURRENT_PROPOSAL is the selection with only the remaining edits " +
-                              "applied, so it may now read awkwardly where edits were reverted. Repair grammar, agreement and flow " +
-                              "with the smallest changes possible. Keep every keep-original phrase exactly as it is and do not " +
-                              "reintroduce any rejected proposal. If CURRENT_PROPOSAL already reads well, answer \"unchanged\".\n");
-                    break;
                 default:
                     sb.Append(reflections.Any(x => x.IsNew)
                         ? "The writer added or changed the reflections marked (new) after reading CURRENT_PROPOSAL. Rewrite " +

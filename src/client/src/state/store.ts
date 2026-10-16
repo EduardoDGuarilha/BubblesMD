@@ -111,6 +111,8 @@ export interface Persisted {
   decisions: DecisionEntry[];
   prefs: Prefs;
   autoRefreshed?: Record<string, string[]>;
+  /** False after the writer went back to the start page: recovery then shows the start page (absent = true). */
+  hasDocument?: boolean;
 }
 
 export interface PersistAdapter {
@@ -133,7 +135,7 @@ interface Capture {
   thoughts: string[];
   keepOriginal: KeepOriginal[];
   revision: number;
-  /** What the result must differ from: the selection (initial/refresh) or the effective proposal (refine/revise). */
+  /** What the result must differ from: the selection (initial/refresh) or the effective proposal (refine). */
   baseline: string;
   /** Set for Enter submissions: the resulting suggestion joins the submission's Undo step if nothing intervened. */
   submission?: { id: string; mutation: number };
@@ -225,7 +227,8 @@ export class WorkspaceStore {
       canRedo: this.history.canRedo,
     };
     this.listeners.forEach((fn) => fn());
-    if (persist && this.persist && this.state.hasDocument) this.scheduleSave();
+    // Without a document only the spending record (and leaving the document) needs saving.
+    if (persist && this.persist && (this.state.hasDocument || 'hasDocument' in patch || 'ledger' in patch)) this.scheduleSave();
   }
 
   private notify(text: string, opts: { undo?: boolean; tone?: 'info' | 'error' } = {}) {
@@ -281,6 +284,30 @@ export class WorkspaceStore {
       hasDocument: true,
       doc,
       tracked: emptyTracked(md),
+      revision: this.state.revision + 1,
+      versions: {},
+      requests: {},
+      activeRequest: null,
+      decisions: [],
+      expanded: null,
+      notice: null,
+      autoRefreshed: {},
+    });
+  }
+
+  /**
+   * Back to the start page. The document, its reviews and history are discarded (the caller confirmed this); requests
+   * in flight are cancelled and any late result is ignored, but every call stays in the spending record, as do prefs.
+   */
+  closeDocument() {
+    for (const c of this.controllers.values()) c.abort();
+    this.controllers.clear();
+    this.history.clear();
+    this.pendingCreation = null;
+    this.set({
+      hasDocument: false,
+      doc: { id: 'none', title: 'Untitled', fileName: null },
+      tracked: emptyTracked(),
       revision: this.state.revision + 1,
       versions: {},
       requests: {},
@@ -455,18 +482,10 @@ export class WorkspaceStore {
     }
     if (!changed) return;
     if (this.state.activeRequest) {
-      this.notify('Busy — your reflection is saved. Use Suggest when the other suggestion finishes.');
+      this.notify('Busy — your reflection is saved. Use Try again when the other suggestion finishes.');
       return;
     }
     this.requestSuggestion(reviewId, isCurrent(this.state.tracked, r, v) ? 'refine' : 'refresh', merge);
-  }
-
-  /** Explicit coherence repair after popping individual edits; popping alone never calls the model. */
-  revise(reviewId: string) {
-    const r = this.state.tracked.reviews[reviewId];
-    const v = r?.activeVersion ? this.state.versions[r.activeVersion] : null;
-    if (!r || !v || !r.popped.length || !isCurrent(this.state.tracked, r, v)) return 'invalid';
-    return this.requestSuggestion(reviewId, 'revise');
   }
 
   popThought(reviewId: string, thoughtId: string) {
@@ -565,12 +584,12 @@ export class WorkspaceStore {
     const keepOriginal = prior ? keepOriginalChoices(prior, r.popped) : [];
     // The writer's current proposal: the active suggestion with their pops applied.
     const effective = prior ? effectiveText(prior.diff, r.popped) : source;
-    if ((action === 'refine' || action === 'revise') && !prior) return 'invalid';
+    if (action === 'refine' && !prior) return 'invalid';
     const priorThoughts = new Set((prior?.thoughts ?? []).map((t) => t.trim()));
     const requestId = uid();
     const mode = this.state.prefs.mode;
     const capture: Capture = {
-      baseline: action === 'refine' || action === 'revise' ? effective : source,
+      baseline: action === 'refine' ? effective : source,
       submission,
       requestId,
       reviewId,
@@ -662,11 +681,6 @@ export class WorkspaceStore {
     const unchanged = res.outcome === 'unchanged' || (res.outcome === 'replace' && isUnchanged(c.baseline, replacement));
     if (res.outcome !== 'replace' || unchanged) {
       // Never install a non-result: the previous proposal and reflections stay as they are.
-      if (c.action === 'revise' && unchanged) {
-        this.set({ ...base, ledger, requests });
-        this.notify('Nothing to revise — the proposal already reads coherently.');
-        return;
-      }
       const reason = res.reason ? ` ${res.reason}` : '';
       const error =
         res.outcome === 'cannot_apply'
@@ -706,7 +720,7 @@ export class WorkspaceStore {
     this.commit(installVersion(this.state.tracked, c.reviewId, version.id), { label: 'suggestion', mergeInto: c.submission });
     const r = this.state.tracked.reviews[c.reviewId];
     if (!isCurrent(this.state.tracked, r, version)) {
-      this.notify('The passage changed while this suggestion was generating, so it is outdated. Use Suggest to refresh it.');
+      this.notify('The passage changed while this suggestion was generating, so it is outdated. Use Refresh to update it.');
     }
   }
 
@@ -774,6 +788,11 @@ export class WorkspaceStore {
       const ledger = (saved.ledger ?? []).map((e) =>
         e.status === 'pending' ? { ...e, status: 'interrupted' as const, charged: 'unknown' as const } : e,
       );
+      if (saved.hasDocument === false) {
+        // The writer left the document: start on the start page, keeping only spending and preferences.
+        this.set({ loaded: true, ledger, prefs: { ...this.state.prefs, ...saved.prefs }, saveStatus: 'saved', saveError }, false);
+        return;
+      }
       this.state = {
         ...this.state,
         loaded: true,
@@ -809,6 +828,7 @@ export class WorkspaceStore {
       decisions: s.decisions,
       prefs: s.prefs,
       autoRefreshed: s.autoRefreshed,
+      hasDocument: s.hasDocument,
     };
   }
 

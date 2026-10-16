@@ -198,7 +198,7 @@ describe('change groups', () => {
   });
 });
 
-describe('reflection submission, no-change handling and Revise', () => {
+describe('reflection submission and no-change handling', () => {
   const attempt = (cost: number) => ({ model: 'test/model', outcome: 'replace', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0, cost }, latencyMs: 1 });
 
   it('submits a second reflection as one refine with isNew and the effective proposal', async () => {
@@ -252,7 +252,7 @@ describe('reflection submission, no-change handling and Revise', () => {
     expect(store.state.versions[store.state.tracked.reviews[del].activeVersion!].replacement).toBe('');
   });
 
-  it('revises from the effective proposal and flags kept wording that went missing', async () => {
+  it('refines from the effective proposal and flags kept wording that went missing', async () => {
     const s = controlledSuggest();
     const store = new WorkspaceStore(s.fn);
     store.newDocument(DOC, { title: 't', fileName: null });
@@ -260,9 +260,9 @@ describe('reflection submission, no-change handling and Revise', () => {
     const v1 = store.state.versions[store.state.tracked.reviews[id].activeVersion!];
     const altered = v1.diff.groups.find((g) => g.kind === 'altered')!;
     store.popChange(id, altered.id);
-    expect(store.revise(id)).toBe('started');
+    store.submitReflection(id, null, 'shorter');
     const payload = s.calls[s.calls.length - 1].payload;
-    expect(payload.action).toBe('revise');
+    expect(payload.action).toBe('refine');
     expect(payload.prior?.keepOriginal).toEqual([{ original: altered.original, proposed: altered.replacement }]);
     s.calls[s.calls.length - 1].resolve({ replacement: 'One small cat sat down.' });
     await flush();
@@ -383,5 +383,38 @@ describe('correction pass: Accept newline, Undo steps and refresh guard', () => 
     reloaded.edit(reloaded.state.tracked.md.replace('sits', 'sat down'), diffText(reloaded.state.tracked.md, reloaded.state.tracked.md.replace('sits', 'sat down')));
     reloaded.expand(id);
     expect(s.calls.length).toBe(calls + 1);
+  });
+});
+
+describe('back to the start page', () => {
+  it('closes the document, keeps spending, ignores a late result and reopens on the start page', async () => {
+    const s = controlledSuggest();
+    let saved: ReturnType<WorkspaceStore['snapshot']> | null = null;
+    const persist = { load: async () => saved, save: async (snap: ReturnType<WorkspaceStore['snapshot']>) => void (saved = snap) };
+    const store = new WorkspaceStore(s.fn, persist);
+    await store.load();
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const first = await reviewWithCandidate(store, s, 0, 12, 'A small cat sat down.');
+    store.submitReflection(first, null, 'shorter'); // in flight when the writer leaves
+    const late = s.calls.at(-1)!;
+    const spent = store.state.ledger.length;
+
+    store.closeDocument();
+    expect(store.state.hasDocument).toBe(false);
+    expect(store.state.tracked.order).toEqual([]);
+    expect(late.signal.aborted).toBe(true);
+    expect(store.state.canUndo).toBe(false);
+    late.resolve({ replacement: 'Late.' });
+    await flush();
+    expect(Object.keys(store.state.versions)).toEqual([]);
+    expect(store.state.ledger.length).toBe(spent);
+    expect(store.state.ledger.find((e) => e.requestId === late.payload.requestId)?.status).toBe('ignored');
+
+    await new Promise((r) => setTimeout(r, 450)); // the debounced save
+    const reloaded = new WorkspaceStore(s.fn, persist);
+    await reloaded.load();
+    expect(reloaded.state.loaded).toBe(true);
+    expect(reloaded.state.hasDocument).toBe(false);
+    expect(reloaded.state.ledger.map((e) => e.requestId)).toEqual(store.state.ledger.map((e) => e.requestId));
   });
 });

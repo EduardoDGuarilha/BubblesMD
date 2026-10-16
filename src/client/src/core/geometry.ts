@@ -1,4 +1,7 @@
-/** Pure layout geometry for review families: a wrapping chain of thoughts and obstacle-aware connector dots. */
+/**
+ * Pure layout geometry for the review space: the wrapping chain of thoughts, the passage connection, clusters of
+ * minimized reviews, the expanded family's placement and the selection action.
+ */
 
 export interface Rect {
   x: number;
@@ -142,62 +145,255 @@ export function chainDots(main: Rect | null, layout: ChainLayout): Dot[] {
 const ROUTE_T = [0.3, 0.56, 0.8];
 const ROUTE_R = [2, 3, 4.4];
 
-/**
- * Thought dots from the passage to a bubble that avoid every obstacle (minimized reviews, other bubbles), each
- * inflated by its motion envelope. Attach points are tried along the bubble's left edge nearest the passage line
- * first, then its top and bottom edges. Returns null rather than drawing dots through anything.
- */
-export function routeDots(source: Point, target: Rect, obstacles: Rect[], obstacleScale = MOTION.markerHover): Dot[] | null {
-  const blocked = obstacles.map((o) => envelope(o, obstacleScale));
-  const candidates: Point[] = [];
-  const top = target.y + 18;
-  const bottom = target.y + target.h - 18;
-  const ys: number[] = [];
-  for (let y = top; y <= bottom; y += 6) ys.push(y);
-  ys.sort((p, q) => Math.abs(p - source.y) - Math.abs(q - source.y));
-  for (const y of ys) candidates.push({ x: target.x - 4, y });
-  for (let x = target.x + 24; x <= target.x + Math.min(target.w - 24, 160); x += 12) {
-    candidates.push({ x, y: target.y - 4 }, { x, y: target.y + target.h + 4 });
+/** Thought dots along a route: three growing dots on a straight run, four on a run with one bend. */
+function routeDots(points: Point[]): Dot[] {
+  if (points.length === 2) {
+    const [a, b] = points;
+    return ROUTE_T.map((t, i) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, r: ROUTE_R[i] }));
   }
-  for (const end of candidates) {
-    const len = Math.hypot(end.x - source.x, end.y - source.y);
-    if (len < 14) return [];
-    const dots = ROUTE_T.map((t, i) => ({ x: source.x + (end.x - source.x) * t, y: source.y + (end.y - source.y) * t, r: ROUTE_R[i] }));
-    const samples: Dot[] = [];
-    for (let d = 4; d < len - 4; d += 5) samples.push({ x: source.x + ((end.x - source.x) * d) / len, y: source.y + ((end.y - source.y) * d) / len, r: 0.5 });
-    const inner = { x: target.x + 2, y: target.y + 2, w: target.w - 4, h: target.h - 4 };
-    const clear = [...dots, ...samples].every((p) => !blocked.some((o) => dotHits(p, o)) && !dotHits(p, inner));
-    if (clear) return dots;
+  return along(points, 4, [1.8, 2.4, 3.2, 4.2]);
+}
+
+/** True when the route and its dots stay clear of every blocked rect and of the target's interior. */
+function clearRoute(points: Point[], dots: Dot[], blocked: Rect[], inner: Rect): boolean {
+  const hit = (p: Dot) => dotHits(p, inner) || blocked.some((o) => dotHits(p, o));
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const from = i === 1 ? 4 : 0;
+    const to = i === points.length - 1 ? len - 4 : len;
+    for (let d = from; d < to; d += 4) if (hit({ x: a.x + ((b.x - a.x) * d) / len, y: a.y + ((b.y - a.y) * d) / len, r: 0.5 })) return false;
+  }
+  return !dots.some(hit);
+}
+
+/** Attach points on the suggestion's left edge, nearest to `y` first. */
+function leftEdge(target: Rect, y: number, maxDy = Infinity): Point[] {
+  const ys: number[] = [];
+  for (let v = target.y + 14; v <= target.y + target.h - 14; v += 4) if (Math.abs(v - y) <= maxDy) ys.push(v);
+  ys.sort((p, q) => Math.abs(p - y) - Math.abs(q - y));
+  return ys.map((v) => ({ x: target.x - 4, y: v }));
+}
+
+export const CONNECT = { passageDy: 40, passageLength: 300 };
+
+export interface Connection {
+  from: 'passage' | 'miniature';
+  dots: Dot[];
+}
+
+/**
+ * The passage → suggestion connection. Normally a short straight run of thought dots from the passage to the
+ * suggestion's left edge near the passage line. When that run is blocked (by any miniature, bubble or control) or
+ * too long, the dots start from the active review's own miniature instead: straight when possible, otherwise with
+ * one bend, out over or under its cluster (`cluster`, the cluster's zone bounds) to the suggestion. With no clear
+ * route, no dots are drawn. `obstacles` and `miniatureZone` are inflated by their motion envelopes already;
+ * `miniature` is the resting rect.
+ */
+export function connectDots(
+  passage: Point | null,
+  miniature: Rect | null,
+  miniatureZone: Rect | null,
+  target: Rect,
+  obstacles: Rect[],
+  cluster: Rect | null = null,
+): Connection | null {
+  const inner = { x: target.x + 2, y: target.y + 2, w: target.w - 4, h: target.h - 4 };
+  const attempt = (points: Point[], blocked: Rect[]) => {
+    const dots = routeDots(points);
+    return clearRoute(points, dots, blocked, inner) ? dots : null;
+  };
+  if (passage) {
+    const blocked = miniatureZone ? [...obstacles, miniatureZone] : obstacles;
+    for (const end of leftEdge(target, passage.y, CONNECT.passageDy)) {
+      const len = Math.hypot(end.x - passage.x, end.y - passage.y);
+      if (len < 14) return { from: 'passage', dots: [] };
+      const dots = len <= CONNECT.passageLength ? attempt([passage, end], blocked) : null;
+      if (dots) return { from: 'passage', dots };
+    }
+  }
+  if (miniature) {
+    const m = miniature;
+    const starts = [
+      { x: m.x + m.w + 2, y: m.y + m.h / 2 },
+      { x: m.x + m.w * 0.82, y: m.y - 1 },
+      { x: m.x + m.w * 0.82, y: m.y + m.h + 1 },
+    ];
+    const runs = starts
+      .flatMap((a) => leftEdge(target, a.y).map((b) => ({ points: [a, b], len: Math.hypot(b.x - a.x, b.y - a.y) })))
+      .sort((p, q) => p.len - q.len);
+    if (runs[0] && runs[0].len < 14) return { from: 'miniature', dots: [] };
+    for (const run of runs) {
+      const dots = attempt(run.points, obstacles);
+      if (dots) return { from: 'miniature', dots };
+    }
+    // Enclosed by its neighbours: rise (or drop) clear of the cluster, then run to the suggestion.
+    const box = cluster ?? m;
+    const bent: { points: Point[]; len: number }[] = [];
+    for (const lift of [10, 16, 22]) {
+      for (const [x, y, lane] of [
+        [m.x + m.w / 2, m.y - 1, box.y - lift],
+        [m.x + m.w / 2, m.y + m.h + 1, box.y + box.h + lift],
+      ]) {
+        for (const end of leftEdge(target, lane).slice(0, 12)) {
+          const points = [{ x, y }, { x, y: lane }, end];
+          bent.push({ points, len: Math.abs(lane - y) + Math.hypot(end.x - x, end.y - lane) });
+        }
+      }
+    }
+    bent.sort((p, q) => p.len - q.len);
+    for (const run of bent) {
+      const dots = attempt(run.points, obstacles);
+      if (dots) return { from: 'miniature', dots };
+    }
   }
   return null;
 }
 
-export const MARKER = { w: 34, h: 24, columns: [0, 44], rowStep: 32 };
+// ---- minimized reviews ------------------------------------------------------------------------------------------
+
+export interface MarkerSize {
+  w: number;
+  h: number;
+}
+
+/** Resting size of a minimized review; with a coarse pointer, styles.css enlarges markers to 44 × 44 targets. */
+export const MARKER: MarkerSize = { w: 34, h: 24 };
+export const COARSE_MARKER: MarkerSize = { w: 44, h: 44 };
 
 /**
- * Minimized reviews: each marker takes the free slot nearest its passage (two columns, rows above/below), so
- * nearby reviews group compactly without overlapping one another even at full hover scale and float.
+ * Honeycomb lattice for markers of one size: neighbours in a row are one motion envelope apart, alternate rows
+ * shift by half a cell, so adjacent rows interlock (a staggered silhouette, never a grid). Anchors closer than
+ * `join` group into one cluster. `pad` is the room the envelope adds on each side of a resting marker.
  */
-export function placeMarkers(anchors: { id: string; top: number }[]): { id: string; x: number; top: number }[] {
-  const placed: { id: string; x: number; top: number }[] = [];
-  const boxes: Rect[] = [];
-  for (const a of [...anchors].sort((p, q) => p.top - q.top)) {
-    const offsets = [0];
-    for (let k = 1; k <= 8; k++) offsets.push(k * MARKER.rowStep, -k * MARKER.rowStep);
-    let chosen: { x: number; top: number } | null = null;
-    for (const dy of offsets) {
-      for (const x of MARKER.columns) {
-        const rect = envelope({ x, y: a.top + dy, w: MARKER.w, h: MARKER.h }, MOTION.markerHover);
-        if (!boxes.some((b) => overlaps(rect, b))) {
-          chosen = { x, top: a.top + dy };
-          boxes.push(rect);
-          break;
-        }
-      }
-      if (chosen) break;
-    }
-    chosen ??= { x: 0, top: a.top + 9 * MARKER.rowStep };
-    placed.push({ id: a.id, ...chosen });
+export function lattice(size: MarkerSize = MARKER) {
+  const zone = envelope({ x: 0, y: 0, w: size.w, h: size.h }, MOTION.markerHover);
+  return { size, pad: { x: -zone.x, y: -zone.y }, pitchX: Math.ceil(zone.w) + 1, pitchY: Math.ceil(zone.h) + 1, join: size.h * 2 };
+}
+
+export const CLUSTER = lattice();
+
+export interface MarkerAnchor {
+  id: string;
+  /** Top of the passage in rail coordinates. */
+  top: number;
+  /** Creation order; breaks ties so the result never depends on which review is open. */
+  seq: number;
+}
+
+export interface PlacedMarker {
+  id: string;
+  x: number;
+  top: number;
+  cluster: number;
+}
+
+/** How many markers fit in a row starting at `offset` within `width` (envelope included). */
+function rowCapacity(l: ReturnType<typeof lattice>, offset: number, width: number): number {
+  const room = width - l.size.w - l.pad.x - offset;
+  return room < 0 ? 0 : Math.floor(room / l.pitchX) + 1;
+}
+
+/**
+ * Minimized reviews as equal-size markers in local clusters beside their passages.
+ *
+ * - Anchors are grouped in order of position: one within `join` of the previous joins its cluster.
+ * - A cluster is packed on the honeycomb lattice in anchor order (higher passages sit higher). Its column count
+ *   follows the cluster size (about √n), narrows when the anchors spread over more lines, and is limited by `width`.
+ * - The cluster is centred on its anchors' span. A cluster that would touch the previous one moves down by the
+ *   smallest amount; nothing goes above `minTop` or past `width`. When `width` holds a single marker, clusters
+ *   become one column. Markers never overlap, including their motion envelopes.
+ */
+export function placeMarkers(anchors: MarkerAnchor[], width: number, size: MarkerSize = MARKER): PlacedMarker[] {
+  const l = lattice(size);
+  const sorted = [...anchors].sort((a, b) => a.top - b.top || a.seq - b.seq);
+  const clusters: MarkerAnchor[][] = [];
+  for (const a of sorted) {
+    const current = clusters[clusters.length - 1];
+    if (current && a.top - current[current.length - 1].top <= l.join) current.push(a);
+    else clusters.push([a]);
   }
+  const evenCap = Math.max(1, rowCapacity(l, 0, width));
+  const oddOffset = rowCapacity(l, l.pitchX / 2, width) > 0 ? l.pitchX / 2 : 0;
+  const oddCap = oddOffset ? rowCapacity(l, oddOffset, width) : evenCap;
+  const placed: PlacedMarker[] = [];
+  let floor = l.pad.y;
+  clusters.forEach((members, index) => {
+    const n = members.length;
+    const span = members[n - 1].top - members[0].top;
+    const rowsBySpan = Math.floor(span / l.pitchY) + 1;
+    const cols = Math.max(1, Math.min(Math.round(Math.sqrt(n)), Math.ceil(n / rowsBySpan), evenCap));
+    const slots: { x: number; row: number }[] = [];
+    for (let row = 0; slots.length < n; row++) {
+      const odd = row % 2 === 1;
+      const offset = odd ? oddOffset : 0;
+      const cap = Math.max(1, Math.min(cols, odd ? oddCap : evenCap));
+      for (let k = 0; k < cap && slots.length < n; k++) slots.push({ x: offset + k * l.pitchX, row });
+    }
+    const rows = slots[slots.length - 1].row + 1;
+    const height = (rows - 1) * l.pitchY;
+    const top = Math.max(members[0].top + span / 2 - height / 2, floor);
+    members.forEach((m, i) => placed.push({ id: m.id, x: slots[i].x, top: top + slots[i].row * l.pitchY, cluster: index }));
+    floor = top + height + l.pitchY;
+  });
   return placed;
+}
+
+/** Resting rect and motion zone (envelope) of a placed marker. */
+export const markerRect = (m: { x: number; top: number }, size: MarkerSize = MARKER): Rect => ({ x: m.x, y: m.top, w: size.w, h: size.h });
+export const markerZone = (m: { x: number; top: number }, size: MarkerSize = MARKER): Rect => envelope(markerRect(m, size), MOTION.markerHover);
+
+export const FAMILY = { min: 236, max: 548, gap: 14, right: 10, edge: 8 };
+
+/** The widest marker footprint the rail can give clusters while still fitting a family of minimum width beside them. */
+export const clusterWidth = (railWidth: number, size: MarkerSize = MARKER) =>
+  Math.max(size.w + lattice(size).pad.x, railWidth - FAMILY.min - FAMILY.gap - FAMILY.right);
+
+/**
+ * Horizontal placement of the expanded family, separate from (and after) marker placement. The family sits just
+ * right of the active review's cluster and of any marker zone beside its vertical span, shrinking its width to fit.
+ * If the rail cannot fit the minimum width there, it opens below the active cluster at the rail's left instead.
+ */
+export function placeFamily(
+  zones: Rect[],
+  activeCluster: Rect[],
+  span: { top: number; bottom: number },
+  railWidth: number,
+): { left: number; width: number; below: number | null } {
+  const beside = zones.filter((z) => z.y < span.bottom && z.y + z.h > span.top);
+  const left = Math.max(FAMILY.edge, ...[...beside, ...activeCluster].map((z) => z.x + z.w + FAMILY.gap));
+  const width = Math.min(FAMILY.max, railWidth - left - FAMILY.right);
+  if (width >= FAMILY.min) return { left, width, below: null };
+  const bottom = Math.max(0, ...activeCluster.map((z) => z.y + z.h));
+  return { left: FAMILY.edge, width: Math.max(0, Math.min(FAMILY.max, railWidth - FAMILY.edge - FAMILY.right)), below: bottom + FAMILY.gap };
+}
+
+// ---- selection action -------------------------------------------------------------------------------------------
+
+/**
+ * Where the selection's "+ Bubble" action goes: just above the first selected line, centred on it, or below the
+ * last line when there is no room above. It stays inside `bounds` (the visible writing column) and never covers a
+ * selected line; with no such place, null.
+ */
+export function placeSelectionAction(lines: Rect[], bounds: { left: number; right: number; top: number; bottom: number }, size: { w: number; h: number }, gap = 6): { x: number; y: number; below: boolean } | null {
+  if (!lines.length) return null;
+  const sorted = [...lines].sort((a, b) => a.y - b.y || a.x - b.x);
+  const first = sorted.filter((r) => r.y < sorted[0].y + sorted[0].h / 2);
+  const lastTop = sorted[sorted.length - 1].y;
+  const last = sorted.filter((r) => r.y + r.h > lastTop + sorted[sorted.length - 1].h / 2);
+  const centre = (row: Rect[]) => (Math.min(...row.map((r) => r.x)) + Math.max(...row.map((r) => r.x + r.w))) / 2;
+  const x = (row: Rect[]) => clamp(centre(row) - size.w / 2, bounds.left, bounds.right - size.w);
+  const covers = (box: Rect) => lines.some((r) => overlaps(box, r));
+  const above = Math.min(...first.map((r) => r.y)) - gap - size.h;
+  if (above >= bounds.top + 2) {
+    const box = { x: x(first), y: above, w: size.w, h: size.h };
+    if (!covers(box)) return { x: box.x, y: box.y, below: false };
+  }
+  const below = Math.max(...last.map((r) => r.y + r.h)) + gap;
+  if (below + size.h <= bounds.bottom - 2) {
+    const box = { x: x(last), y: below, w: size.w, h: size.h };
+    if (!covers(box)) return { x: box.x, y: box.y, below: true };
+  }
+  return null;
 }

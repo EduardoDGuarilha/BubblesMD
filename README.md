@@ -50,23 +50,27 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 
 - **Start:** create a document or open/drop a `.md` file (≤ 1 MiB, read locally; nothing is sent anywhere). Saved
   work in this browser reopens automatically. New/Open on an existing document asks before replacing it, and offers
-  Export first.
-- **Ask:** select text, then press the **Bubble** button beside the selection's last line (or Ctrl/Cmd+Alt+M) and
-  write a reflection. Enter submits it; Shift+Enter adds a line. Selecting, creating and typing never call the model.
+  Export first. The **Bubbles.MD** title goes back to the start page with the same confirmation (Export current /
+  Leave / Cancel); after leaving, a reload stays on the start page and the spending record is kept.
+- **Ask:** select text, then press the **+ Bubble** action that appears just above it (below it at the top edge), or
+  Ctrl/Cmd+Alt+M, and write a reflection. The action keeps still under the pointer; in Formatted view Tab reaches it
+  (in Markdown view Tab indents, so use the shortcut). Enter submits it; Shift+Enter adds a line. Selecting, creating and typing never call the model.
 - **Review:** the suggestion bubble contains exactly the replacement for your selection.
   - Yellow marks altered wording, red marks deleted wording, and a green **+** marks added text.
-  - Hover or focus any change to highlight the matching spans on both sides.
+  - Hover or focus any change to highlight the matching spans on both sides (their own outlines grow stronger).
   - Click a change on either side, or press Enter on it, to **pop** it: an alteration or deletion falls back to the
     original wording, and an addition is removed. Popping never changes the document and never calls the model.
 - **Refine:** submit another reflection with Enter and an updated suggestion is requested directly. Blur only saves it.
-  **Suggest** regenerates explicitly. Popped edits are sent as explicit "keep original" choices.
-- **Revise:** after popping edits, **Revise** asks the model to repair the flow of the current proposal without bringing
-  back what you rejected. A chip flags any kept wording that went missing or a removed addition that came back.
+  **Try again** regenerates explicitly (**Refresh** when the passage changed; **Retry** only after a failure). Popped
+  edits are sent as explicit "keep original" choices, and a chip flags any kept wording that went missing or a removed
+  addition that came back.
 - **No change:** if a result is identical to what it should improve, it is not installed. The server makes one
   corrective call (both are counted); if that also makes no change, your previous proposal stays and Retry appears.
 - **Decide:** Accept replaces only that passage, as one undoable step. Reject or × discards the review and leaves the
   document unchanged.
-- **Navigate:** Escape or a click outside minimizes the review to a ••• marker beside its passage. Undo/Redo
+- **Navigate:** Escape or a click outside minimizes the review to a ••• marker beside its passage. Nearby markers
+  form a small staggered cluster that never reshuffles; the open review's marker keeps its place with a stronger rim.
+  Hovering or focusing a marker highlights its passage without opening it. Undo/Redo
   (toolbar, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) restores document, reviews, reflections and pops together.
 - **Views:** switch between **Formatted** (Tiptap) and **Markdown** (CodeMirror) at any time. It is one document;
   switching never edits or generates.
@@ -115,15 +119,19 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
     8,000 max output tokens and a 90 s timeout.
   - It rejects truncated, malformed or unsafe output, and returns `usage.cost` (null when absent).
   - When a result makes no change, it makes exactly one corrective call. That call sends the unsuccessful answer back
-    with an explanation and asks for a meaningful revision. Revise is exempt, and every call is reported with its usage.
+    with an explanation and asks for a meaningful revision. Every call is reported with its usage.
   - It makes no other retries or model fallbacks. `GET /api/config` lists modes and rates.
 - **Bubbles.** Soap-film surfaces (translucent fill, thin rim, a masked iridescent ring and a glint) are sized to their
   content.
   - Reflections form one wrapping chain laid out from measured sizes (`core/geometry.ts`); dots link consecutive
     bubbles from their real edges, through the gaps between them.
-  - The passage → bubble dots are routed around minimized reviews and the family's other bubbles, or omitted.
-  - Spacing includes the animation envelope (float, inflate overshoot, hover scale), and minimized reviews take the
-    nearest free slot beside their passage.
+  - Minimized reviews are packed per local cluster on a honeycomb lattice (`placeMarkers`), and the family is placed
+    beside the clusters afterwards (`placeFamily`). Opening a review changes neither arrangement.
+  - The passage → suggestion dots take a short straight run when clear; otherwise they start from the active review's
+    miniature (straight or with one bend around its cluster), and are omitted rather than drawn through anything.
+  - Spacing includes the animation envelope (float, inflate overshoot, hover scale).
+  - Highlights (change pairs, passage peek) are one scoped style rule keyed by review id, so editor DOM is never
+    mutated and no overlay is drawn.
   - Floating pauses under the pointer.
   - Pops play the supplied recording `public/sounds/bubble-pop.mp3` (Universfield, "bubble pop 02"; file supplied by
     Eduardo, license to be confirmed before publishing) with a short rupture animation, falling back to a synthesized
@@ -144,7 +152,7 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 ## Verification performed
 
 Automated:
-- **Vitest (28):** (8 added in the correction pass: newline, history steps, refresh guard, geometry)
+- **Vitest (35):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document)
   - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
     lists, Markdown-looking code, cross-block selections, loud failure.
   - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
@@ -156,14 +164,18 @@ Automated:
   - An unchanged result is not installed: the previous version and reflections are kept, and both attempts are in
     the ledger.
   - Formatting-only changes and intentional deletions count as real changes.
-  - Revise works from the effective proposal and flags missing kept wording.
+  - A refinement after a pop carries the keep-original choice and flags kept wording that went missing.
+  - Marker clusters: deterministic, staggered (neither a column nor a row), no overlap with the motion envelope or at
+    touch size, minimal push-down, narrow single column; family placement; connection choice (passage, miniature
+    straight or bent, none); selection-action placement.
+  - Leaving a document: in-flight request cancelled, late result ignored, spend kept, reload shows the start page.
 - **xUnit (14):**
   - request bounds, outcome parsing with actual cost, unknown cost, empty replacement, truncated / malformed / unsafe
     output, 402/429 mapping, prompt fencing and keep-original records;
   - the no-change rule: whitespace vs. paragraph and formatting changes;
   - exactly one correction, with both calls reported;
   - still unchanged after the correction → no third call;
-  - Revise is never corrected;
+  - the removed `revise` action is rejected by validation;
   - a failed correction still reports the first call.
 
 Walked through in the in-app browser:
@@ -181,7 +193,7 @@ Walked through in the in-app browser:
   - real clicks popping added (source +), altered (suggestion) and deleted (source) changes, with hover cleared;
   - Enter-to-refine;
   - fixture `#same` (corrected, 2 calls) and `#stubborn` (failure with Retry, proposal kept);
-  - Revise, including "nothing to revise";
+  - Revise, including "nothing to revise" (the feature was removed in the 2026-10-16 interaction pass);
   - a clustered markers / long family / generating state at 1440 and the docked dark layout at 390;
   - regression checks after the revision: Accept/Undo/Redo, Markdown switch, outside-click minimize and reload
     recovery.
@@ -198,7 +210,7 @@ with unknown cost, well within the $5 key cap.
   - Smart initial suggestion ($0.0042), then "too verbose" submitted with Enter: a genuinely shorter refinement on the
     first call (53 → 44 words, $0.0048, no correction needed);
   - Fast Revise after keeping one original phrase: coherent repair, nothing flagged ($0.00044). It also reworded one
-    later phrase beyond the minimal repair, which shows in the diff.
+    later phrase beyond the minimal repair, which shows in the diff (Revise was later removed).
 
 **Correction pass of 2026-10-16** (placement, chain, Accept newline, Undo steps).
 
@@ -225,14 +237,65 @@ Verified:
   Enter.
 - **Tests:** Vitest 28/28, xUnit 14/14.
 
+**Interaction pass of 2026-10-16** (clusters, connections, peek, highlights, +, selection action, Try again, Revise
+removed, title navigation).
+
+Causes found:
+- Opening a review reshuffled the markers for two reasons. The open review was left out of marker placement, so the
+  others re-slotted. And the open review's insertion + re-wrapped a line, which moved later anchors.
+- The old placement used two fixed columns, which made the grid look.
+- Hover drew rectangles over the already-rounded decorations: an offset duplicate outline.
+- The inline + sat low because its inline-grid took its baseline from the SVG; in Markdown headings it was outside
+  the enlarged token.
+- Touch-size (44 px) markers were spaced as 34 × 24.
+
+Verified in the real editor (fixture provider):
+- **Five reviews on nearby lines:**
+  - a staggered 2-2-1 cluster;
+  - each review opened in turn with every marker position identical, and identical again after minimizing;
+  - the active rim and `aria-pressed`;
+  - every review connected (four from their miniature, one from the passage);
+  - hover and focus on each marker highlighted only its passage, with no request, and overlapping reviews stayed
+    distinct.
+- **Layout:** 0 marker overlaps, 0 markers on bubbles and 0 dot contacts at 1440, at 1024 (also scrolled) and at 390
+  (single column, touch size, docked family, no horizontal scroll).
+- **Highlights:** a wrapped deletion ringed per line fragment, on exactly that review's source span and candidate
+  marker, with no layout shift.
+- **Insertion +:** circle centre against the text centre: paragraph +0.19 px, bold +0.19, heading +0.77, Markdown
+  +0.69, Markdown heading +0.09 (cap-height centre within 1 px too). Line heights are unchanged.
+- **Selection action:**
+  - centred 6 px above a word;
+  - above the first line of a two-line drag selection;
+  - clamped at the left edge, and below the line at the top edge;
+  - back above after scrolling, and re-measured after a resize;
+  - still under pointer approach;
+  - click, Tab + Enter (Formatted) and Ctrl/Cmd+Alt+M (Markdown) each created the review from exactly the selection.
+- **Title:**
+  - Cancel kept everything;
+  - Leave with a 4 s request in flight showed the start page, and the request stayed in spend as "cancelled · charge
+    unknown" with no late install;
+  - a reload stayed on the start page, with all 48 ledger entries kept.
+- **Regressions:** Enter submission (one Undo step), Try again (refine), pop by clicking the source (no request),
+  Accept → Undo → Redo with no request, Markdown marks with review ids, and the recording decodes.
+- **Published build:** UI, `/api/config` and SPA fallback.
+- **One live Fast call ($0.0002):** "honestly the results was kind of good and people liked it alot" → "...were kind of
+  good and people liked it a lot", keeping the casual tone.
+- **Tests:** Vitest 35/35, xUnit 14/14.
+
 ## Known limitations
 
 - Very large documents are serialized and diffed on every Formatted keystroke; this is fine for typical documents and
   untested near the 1 MiB import limit.
 - A selection that cuts through a word is sent as-is. The prompt now states mid-word boundaries; this fixed the one
   observed case, but a model can still produce an awkward join, so check the diff before accepting.
-- The no-change check is textual: it proves the text changed, not that it improved. Revise asks for minimal repairs,
-  but a model may still reword more than needed; the diff shows it and each edit can be popped.
+- The no-change check is textual: it proves the text changed, not that it improved. A refinement may reword more than
+  asked; the diff shows it and each edit can be popped.
+- While a review is open, the markers keep the positions measured with every review minimized. When the open
+  review's insertion + re-wraps a line, markers of later passages can sit up to a line away from them until it closes.
+- If the family is clamped to the viewport and every straight or one-bend route is blocked, no connection is drawn
+  (seen once: a top-row marker scrolled near the top edge).
+- The selection action hides when a selection is taller than the visible area (neither above nor below fits);
+  Ctrl/Cmd+Alt+M still works.
 - Thought dots are recomputed on every layout pass but do not follow the ±1.5 px float exactly.
 - The pop sound uses Web Audio and may be silent until the page has had a user gesture.
 - No accounts, sync, multiplayer or server storage (by design). Browser storage is local recovery, not a backup.

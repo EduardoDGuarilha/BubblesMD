@@ -9,6 +9,7 @@
   --edge: #c87c40;
   --edge-soft: rgba(200, 124, 64, 0.45);
   --target: rgba(200, 124, 64, 0.1);
+  --peek: rgba(200, 124, 64, 0.16);
   --yellow: #a47b13;
   --yellow-soft: #fcf2d4;
   --red: #c05952;
@@ -46,6 +47,7 @@
     --edge: #dda16b;
     --edge-soft: rgba(221, 161, 107, 0.5);
     --target: rgba(221, 161, 107, 0.12);
+    --peek: rgba(221, 161, 107, 0.2);
     --yellow: #d9b64a;
     --yellow-soft: #494124;
     --red: #e59890;
@@ -125,9 +127,21 @@ button:disabled {
 }
 
 .brand {
+  font: inherit;
   font-weight: 650;
   font-size: 16px;
   letter-spacing: -0.4px;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  cursor: pointer;
+}
+
+.brand:hover {
+  color: var(--edge);
 }
 
 .title-input {
@@ -508,7 +522,9 @@ button:disabled {
   border: 1px solid var(--yellow);
   background: var(--yellow-soft);
   border-radius: 0.6em;
+  /* The outline grows outward: padding and border are cancelled by margins, so marking never re-wraps text. */
   padding: 0 0.15em;
+  margin: 0 calc(-0.15em - 1px);
   cursor: pointer;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
@@ -519,8 +535,51 @@ button:disabled {
   background: var(--red-soft);
 }
 
-/* Insertion and syntax-only markers sit inside the line box, sized in em, so line height never changes. */
-.src-insert,
+/*
+ * The insertion marker is an inline-block holding only a generated no-break space: it sits on the text baseline
+ * and is exactly one line tall, so its middle is the middle of the surrounding text for any font, size or line
+ * height. The circle (::after) and the plus are centred on that middle. Nothing is inserted into the text.
+ */
+.src-insert {
+  display: inline-block;
+  position: relative;
+  width: 1.05em;
+  margin: 0 0.12em;
+  vertical-align: baseline;
+  color: var(--green);
+  cursor: pointer;
+  user-select: none;
+}
+
+.src-insert::before {
+  content: '\a0';
+}
+
+.src-insert::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1.05em;
+  height: 1.05em;
+  margin-top: -0.525em;
+  box-sizing: border-box;
+  border: 1px solid var(--green);
+  border-radius: 50%;
+  background: var(--green-soft);
+}
+
+.src-insert .plus-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.7em;
+  height: 0.7em;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+}
+
+/* Syntax-only markers (a small diamond) sit inside the line box, sized in em, so line height never changes. */
 .src-point {
   display: inline-grid;
   place-items: center;
@@ -529,18 +588,11 @@ button:disabled {
   margin: 0 0.12em;
   vertical-align: -0.16em;
   line-height: 0;
-  border: 1px solid var(--green);
+  border: 1px solid var(--yellow);
   border-radius: 50%;
-  background: var(--green-soft);
-  color: var(--green);
   cursor: pointer;
   user-select: none;
   font-family: var(--font);
-}
-
-.src-insert .plus-icon {
-  width: 70%;
-  height: 70%;
 }
 
 .src-point {
@@ -556,7 +608,7 @@ button:disabled {
   color: var(--red);
 }
 
-/* Overlay: synchronized highlight of the source side, and the computed thought dots. */
+/* Overlay: the computed passage → suggestion thought dots. */
 .overlay {
   position: absolute;
   inset: 0;
@@ -565,22 +617,6 @@ button:disabled {
   pointer-events: none;
   overflow: visible;
   z-index: 5;
-}
-
-.overlay .link-box {
-  fill: color-mix(in srgb, var(--yellow) 16%, transparent);
-  stroke: var(--yellow);
-  stroke-width: 1.6;
-}
-
-.overlay .link-box.deleted {
-  fill: color-mix(in srgb, var(--red) 14%, transparent);
-  stroke: var(--red);
-}
-
-.overlay .link-box.added {
-  fill: color-mix(in srgb, var(--green) 16%, transparent);
-  stroke: var(--green);
 }
 
 .overlay .thought-dot {
@@ -701,28 +737,48 @@ button:disabled {
   z-index: 2;
 }
 
-/* The selection action sits in the gutter beside the selection's last line. */
-.plus-bubble {
+/* The open review's miniature stays in its cluster; a stronger rim marks it. */
+.marker.active {
+  color: var(--edge);
+  border: 1.5px solid var(--edge);
+  box-shadow:
+    inset 0 1px 1.5px var(--rim-light),
+    0 0 0 2px var(--edge-soft),
+    var(--bubble-shadow);
+}
+
+/* The selection's action: above (or below) the selected words, steady under the pointer (no float or scale). */
+.sel-action {
   position: absolute;
-  left: -32px;
+  z-index: 8;
+  /* Fixed size, so its first placement is exact (App.tsx SEL_ACTION). */
+  width: 84px;
   height: 28px;
-  padding: 0 12px 0 2px;
+  padding: 0 8px;
+  justify-content: center;
   border-radius: 14px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 12.5px;
-  z-index: 7;
-  animation: inflate 0.22s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: appear 0.16s ease-out both;
 }
 
-.plus-disc {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+.sel-action .plus-icon {
   color: var(--edge);
+}
+
+.sel-action:hover,
+.sel-action:focus-visible {
+  border-color: var(--edge);
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
 }
 
 .plus-icon {
@@ -733,6 +789,7 @@ button:disabled {
 
 /* ---------- review family ---------- */
 
+/* Left, width and top are measured: beside the clusters of minimized reviews (core/geometry.ts placeFamily). */
 .family {
   position: absolute;
   left: 84px;
@@ -910,14 +967,6 @@ button:disabled {
   background: var(--green-soft);
 }
 
-.cand-change.linked {
-  box-shadow: 0 2px 0 var(--yellow);
-}
-
-.cand-change.added.linked {
-  box-shadow: 0 2px 0 var(--green);
-}
-
 .cand-marker {
   cursor: pointer;
 }
@@ -932,7 +981,6 @@ button:disabled {
   opacity: 0.75;
 }
 
-.cand-marker.gap.linked,
 .cand-marker.gap:focus-visible {
   opacity: 1;
   background: var(--red-soft);
@@ -1456,20 +1504,6 @@ button:disabled {
 
 .app.narrow .rail {
   grid-column: 3;
-}
-
-.app.narrow .plus-bubble {
-  left: auto;
-  right: 6px;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border-radius: 50%;
-  justify-content: center;
-}
-
-.app.narrow .plus-label {
-  display: none;
 }
 
 .app.narrow .document {

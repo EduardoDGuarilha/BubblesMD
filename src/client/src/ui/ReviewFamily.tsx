@@ -238,11 +238,10 @@ function MainBubble({
   const canAccept = !!version && current && !nothing && !generating;
   const hasThoughts = review.thoughts.some((t) => t.text.trim());
   const canSuggest = !generating && !busyElsewhere && hasThoughts && !review.blocked;
-  const canRevise = !!version && current && review.popped.length > 0 && !nothing && !generating && !busyElsewhere;
   const [details, setDetails] = useState(false);
 
   let heading = 'Possible revision';
-  if (generating) heading = request.action === 'revise' ? 'Revising for flow…' : version ? 'Updating the suggestion…' : 'Thinking about your reflections…';
+  if (generating) heading = version ? 'Updating the suggestion…' : 'Thinking about your reflections…';
   else if (!version && failed) heading = request.status === 'interrupted' ? 'Interrupted' : 'No suggestion yet';
   else if (version && failed) heading = request.status === 'interrupted' ? 'Update interrupted — previous suggestion shown' : 'Update failed — previous suggestion shown';
 
@@ -297,6 +296,7 @@ function MainBubble({
         <>
           {effective === '' && !nothing && <p className="reason">This suggestion deletes the whole selection.</p>}
           <CandidateBody
+            reviewId={review.id}
             version={version}
             popped={review.popped}
             raw={raw}
@@ -329,24 +329,18 @@ function MainBubble({
             Accept
           </button>
         )}
-        <button
-          type="button"
-          className="pill"
-          disabled={!canSuggest}
-          title={busyElsewhere ? 'Busy — another suggestion is generating' : 'Generate again from your reflections'}
-          onClick={() => store.requestSuggestion(review.id, version && !current ? 'refresh' : version ? 'refine' : 'initial')}
-        >
-          {busyElsewhere ? 'Busy' : version && !current ? 'Refresh' : 'Suggest'}
-        </button>
-        {version && review.popped.length > 0 && (
+        {/* Without a suggestion yet, progress or the failure's Retry is the only action. */}
+        {version && (
           <button
             type="button"
             className="pill"
-            disabled={!canRevise}
-            title="Smooth the proposal after your pops, keeping the original wording you chose"
-            onClick={() => store.revise(review.id)}
+            disabled={!canSuggest}
+            title={
+              busyElsewhere ? 'Busy — another suggestion is generating' : current ? 'Generate a new suggestion from your reflections' : 'Suggest again for the changed passage'
+            }
+            onClick={() => store.requestSuggestion(review.id, current ? 'refine' : 'refresh')}
           >
-            Revise
+            {busyElsewhere ? 'Busy' : current ? 'Try again' : 'Refresh'}
           </button>
         )}
         <button type="button" className="pill" onClick={onPopFamily}>
@@ -403,6 +397,7 @@ const fmt = (n: number | null) => (n === null ? '?' : n.toLocaleString());
 const shortModel = (m: string) => m.split('/').pop() ?? m;
 
 function CandidateBody({
+  reviewId,
   version,
   popped,
   raw,
@@ -410,6 +405,7 @@ function CandidateBody({
   onPop,
   onHover,
 }: {
+  reviewId: string;
   version: CandidateVersion;
   popped: string[];
   raw: boolean;
@@ -419,9 +415,9 @@ function CandidateBody({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const { root } = renderCandidate(version.diff, popped, raw);
+    const { root } = renderCandidate(version.diff, popped, raw, reviewId);
     ref.current?.replaceChildren(...root.childNodes);
-  }, [version, popped, raw]);
+  }, [version, popped, raw, reviewId]);
 
   const activate = (target: EventTarget | null) => {
     const el = (target as HTMLElement | null)?.closest<HTMLElement>('[data-change]');
