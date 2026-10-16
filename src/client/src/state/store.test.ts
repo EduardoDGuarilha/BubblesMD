@@ -271,3 +271,117 @@ describe('reflection submission, no-change handling and Revise', () => {
     expect(v2.checks?.[0]).toMatch(/Changed wording you kept/);
   });
 });
+
+describe('correction pass: Accept newline, Undo steps and refresh guard', () => {
+  it('accepts an inline replacement without the model-added line break, keeping intentional breaks', async () => {
+    const { stripAccidentalBoundaryBreaks } = await import('../core/changes');
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    const doc = 'Our team shipped version 2.4 on March 3.\n\nNext paragraph.\n';
+    store.newDocument(doc, { title: 't', fileName: null });
+    const id = store.createReview(0, 'Our team shipped'.length)!;
+    store.submitReflection(id, null, 'it was only eduardo');
+    s.calls[s.calls.length - 1].resolve({ replacement: 'Eduardo shipped\n' });
+    await flush();
+    store.accept(id);
+    expect(store.state.tracked.md).toBe('Eduardo shipped version 2.4 on March 3.\n\nNext paragraph.\n');
+    expect(stripAccidentalBoundaryBreaks('First idea.', 'First idea.\n\n')).toBe('First idea.\n\n');
+    expect(stripAccidentalBoundaryBreaks('one two', 'one\ntwo')).toBe('one\ntwo');
+    expect(stripAccidentalBoundaryBreaks('Para one.\n\nPara two.\n', 'Para one, revised.\n')).toBe('Para one, revised.\n');
+    expect(stripAccidentalBoundaryBreaks('delete me', '')).toBe('');
+  });
+
+  it('Accept then Undo restores document, review, reflections, version and pops in one step; Redo needs no request', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'A small cat sat down.');
+    const v = store.state.tracked.reviews[id].activeVersion!;
+    store.popChange(id, store.state.versions[v].diff.groups[0].id);
+    const before = store.state.tracked.reviews[id];
+    const calls = s.calls.length;
+    const spend = store.state.ledger.length;
+    store.accept(id);
+    expect(store.historyLabels().at(-1)).toBe('accept');
+    store.undo();
+    const r = store.state.tracked.reviews[id];
+    expect(store.state.tracked.md).toBe(DOC);
+    expect([r.status, r.activeVersion, r.popped, r.thoughts]).toEqual(['open', v, before.popped, before.thoughts]);
+    store.redo();
+    expect(store.state.tracked.reviews[id].status).toBe('accepted');
+    expect(s.calls.length).toBe(calls);
+    expect(store.state.ledger.length).toBe(spend);
+  });
+
+  it('makes an Enter submission and its suggestion one Undo step, but never merges across other actions', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = store.createReview(0, 12)!;
+    store.submitReflection(id, null, 'warmer');
+    s.calls.at(-1)!.resolve({ replacement: 'The cat sat down.' });
+    await flush();
+    expect(store.historyLabels()).toEqual(['submit reflection']); // creation + first reflection + initial suggestion
+    const v1 = store.state.tracked.reviews[id].activeVersion;
+
+    store.submitReflection(id, null, 'shorter');
+    s.calls.at(-1)!.resolve({ replacement: 'The cat sat.' + ' Down.' });
+    await flush();
+    expect(store.historyLabels()).toEqual(['submit reflection', 'submit reflection']);
+    store.undo();
+    expect(store.state.tracked.reviews[id].activeVersion).toBe(v1);
+    expect(store.state.tracked.reviews[id].thoughts.map((t) => t.text)).toEqual(['warmer']);
+
+    // An edit while the update generates keeps the suggestion as its own step.
+    store.submitReflection(id, null, 'calmer');
+    userEdit(store, DOC + ' More.');
+    s.calls.at(-1)!.resolve({ replacement: 'The calm cat sat.' });
+    await flush();
+    expect(store.historyLabels().slice(-3)).toEqual(['submit reflection', 'typing', 'suggestion']);
+
+    // A failed submission keeps its reflection as an ordinary, undoable step.
+    store.submitReflection(id, null, 'formal');
+    s.calls.at(-1)!.resolve({ outcome: 'cannot_apply', replacement: null, reason: 'No.' });
+    await flush();
+    expect(store.state.requests[id]?.status).toBe('failed');
+    expect(store.historyLabels().at(-1)).toBe('submit reflection');
+    store.undo();
+    expect(store.state.tracked.reviews[id].thoughts.map((t) => t.text)).not.toContain('formal');
+  });
+
+  it('cancelling an empty new review leaves no Undo step', () => {
+    const store = new WorkspaceStore(controlledSuggest().fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = store.createReview(0, 12)!;
+    store.expand(null);
+    expect(store.historyLabels()).toEqual([]);
+    expect(store.state.tracked.reviews[id]).toBeUndefined();
+  });
+
+  it('refreshes an outdated state at most once, also after a reload, but again for a new source edit', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    store.newDocument(DOC, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, 12, 'The dog sat.');
+    store.expand(null);
+    userEdit(store, DOC.replace('cat sat', 'cat sits'));
+    store.expand(id);
+    expect(s.calls.at(-1)!.payload.action).toBe('refresh');
+    s.calls.at(-1)!.resolve({ replacement: 'The dog sits.' });
+    await flush();
+    store.undo(); // back to the outdated state the refresh was made for
+    store.expand(null);
+    const calls = s.calls.length;
+    store.expand(id);
+    expect(s.calls.length).toBe(calls);
+
+    const reloaded = new WorkspaceStore(s.fn, { load: async () => store.snapshot(), save: async () => {} });
+    await reloaded.load();
+    reloaded.expand(id);
+    expect(s.calls.length).toBe(calls);
+    reloaded.expand(null);
+    reloaded.edit(reloaded.state.tracked.md.replace('sits', 'sat down'), diffText(reloaded.state.tracked.md, reloaded.state.tracked.md.replace('sits', 'sat down')));
+    reloaded.expand(id);
+    expect(s.calls.length).toBe(calls + 1);
+  });
+});

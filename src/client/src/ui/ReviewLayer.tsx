@@ -5,6 +5,7 @@ import type { StoreState, WorkspaceStore } from '../state/store';
 import type { EditorHandle } from '../editor/types';
 import { ReviewFamily } from './ReviewFamily';
 import { PlusIcon } from './PlusIcon';
+import { placeMarkers, routeDots } from '../core/geometry';
 
 interface Props {
   store: WorkspaceStore;
@@ -38,21 +39,6 @@ interface Layout {
   visBottom: number;
 }
 
-/** Offsets for 1–3 minimized reviews sharing a band: a small cluster instead of a long column. */
-const CLUSTER: Record<number, [number, number][]> = {
-  1: [[0, 0]],
-  2: [
-    [0, -8],
-    [26, 8],
-  ],
-  3: [
-    [0, 0],
-    [26, -13],
-    [26, 13],
-  ],
-};
-const BAND = 30;
-
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function dot(group: Element, x: number, y: number, r: number) {
@@ -62,12 +48,6 @@ function dot(group: Element, x: number, y: number, r: number) {
   c.setAttribute('r', r.toFixed(1));
   c.setAttribute('class', 'thought-dot');
   group.append(c);
-}
-
-/** Thought dots along a line, growing from the "thinker" (from) towards the bubble (to). */
-function trail(group: Element, from: { x: number; y: number }, to: { x: number; y: number }, ts: number[], rs: number[]) {
-  if (Math.hypot(to.x - from.x, to.y - from.y) < 14) return;
-  ts.forEach((t, i) => dot(group, from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, rs[i]));
 }
 
 /**
@@ -109,19 +89,11 @@ export function ReviewLayer({ store, state, handle, scrollerRef, tick, narrow, r
         raw.push({ id: r.id, top, label: `Open review · ${n} ${n === 1 ? 'thought' : 'thoughts'}` });
       }
     }
-    raw.sort((a, b) => a.top - b.top);
-    const bands: { top: number; items: typeof raw }[] = [];
-    for (const m of raw) {
-      const last = bands[bands.length - 1];
-      if (last && m.top - last.top < BAND && last.items.length < (narrow ? 1 : 3)) last.items.push(m);
-      else {
-        const floor = last ? last.top + (last.items.length > 1 ? 52 : 36) : -Infinity;
-        bands.push({ top: Math.max(m.top, floor), items: [m] });
-      }
-    }
-    const markers: Marker[] = bands.flatMap((b) =>
-      b.items.map((m, i) => ({ id: m.id, label: m.label, x: CLUSTER[b.items.length][i][0], top: b.top + CLUSTER[b.items.length][i][1] })),
-    );
+    // Nearby minimized reviews take the nearest free slot (no overlap, including hover scale and float).
+    const markers: Marker[] = (narrow
+      ? placeMarkers(raw).map((m) => ({ ...m, x: 0 }))
+      : placeMarkers(raw)
+    ).map((m) => ({ ...m, label: raw.find((r) => r.id === m.id)!.label }));
     let plus: number | null = null;
     const sel = handle.hasFocus() ? handle.getSelection() : null;
     if (sel && !('error' in sel)) {
@@ -154,29 +126,22 @@ export function ReviewLayer({ store, state, handle, scrollerRef, tick, narrow, r
 
     const railRect = rail.getBoundingClientRect();
     const canvasRect = rail.parentElement!.getBoundingClientRect();
-    const toCanvas = (x: number, y: number) => ({ x: x - canvasRect.left, y: y - canvasRect.top });
-    const famRect = el.getBoundingClientRect();
-    const visible = (r: DOMRect) => r.bottom > famRect.top + 4 && r.top < famRect.bottom - 4;
-    const main = el.querySelector<HTMLElement>('.review') ?? el.querySelector<HTMLElement>('.thought');
+    const box = (r: DOMRect) => ({ x: r.left - canvasRect.left, y: r.top - canvasRect.top, w: r.width, h: r.height });
+    const main = el.querySelector<HTMLElement>('.family-inner > .review') ?? el.querySelector<HTMLElement>('.chain-item');
     if (!main) return;
-    const m = main.getBoundingClientRect();
-    // Passage → family: from the edge of the prose at the passage's first line to the bubble's nearest edge.
+    const famRect = el.getBoundingClientRect();
+    // Passage → family: from the prose edge at the passage's first line to the bubble, routed around minimized
+    // reviews and the family's other bubbles (each with its motion envelope). No clear route → no dots.
+    const obstacles = [
+      ...[...rail.querySelectorAll<HTMLElement>('.marker')].map((m) => box(m.getBoundingClientRect())),
+      ...[...el.querySelectorAll<HTMLElement>('.chain-item')]
+        .filter((b) => b !== main)
+        .map((b) => b.getBoundingClientRect())
+        .filter((r) => r.bottom > famRect.top && r.top < famRect.bottom)
+        .map(box),
+    ];
     const source = { x: layout.docRight + railRect.left - canvasRect.left + 6, y: layout.family.lineMid + railRect.top - canvasRect.top };
-    const target = toCanvas(m.left - 4, Math.min(Math.max(source.y + canvasRect.top, m.top + 16), m.bottom - 16));
-    trail(svg, source, target, [0.3, 0.56, 0.8], [2, 3, 4.4]);
-    // Reflections → suggestion (or each reflection to the previous one in a draft).
-    const thoughts = [...el.querySelectorAll<HTMLElement>('.thought, .add-thought')].filter((t) => t !== main);
-    let prev = m;
-    for (const t of thoughts) {
-      const r = t.getBoundingClientRect();
-      if (!visible(r)) continue;
-      const anchor = main.classList.contains('review') ? m : prev;
-      const fromX = Math.min(Math.max(r.left + 22, anchor.left + 22), anchor.right - 22);
-      const from = toCanvas(fromX, anchor.bottom - 2);
-      const to = toCanvas(r.left + 22, r.top + 2);
-      if (to.y - from.y > 6) trail(svg, from, to, [0.35, 0.72], [1.5, 2.3]);
-      prev = r;
-    }
+    for (const d of routeDots(source, box(main.getBoundingClientRect()), obstacles) ?? []) dot(svg, d.x, d.y, d.r);
   });
 
   const family = expanded && (
@@ -191,6 +156,7 @@ export function ReviewLayer({ store, state, handle, scrollerRef, tick, narrow, r
       onBackToPassage={() => handle?.scrollTo(expanded.from)}
       onRetarget={() => onRetarget(expanded.id)}
       onHoverChange={onHoverChange}
+      onGeometryChange={() => setSettled((n) => n + 1)}
     />
   );
 

@@ -32,6 +32,7 @@ public static class PromptBuilder
           Never invent facts. If a reflection needs information you do not have, improve what you can without inventing it.
         - Respect every keep-original choice: the writer rejected those proposed edits and wants that original wording kept.
         - Keep Markdown formatting appropriate to the passage. Do not use raw HTML.
+        - Keep the selection's leading and trailing whitespace and line breaks unless a reflection asks to change them.
 
         Answer with a JSON object only: {"outcome": "...", "replacement": "...", "reason": "..."}
         - outcome "replace": replacement is the complete new Markdown for the selection. It may be empty only when the

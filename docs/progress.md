@@ -58,3 +58,24 @@ provider.
 found and fixed in the browser: pausing the float under the pointer also froze newly inflating bubbles at opacity 0.
 
 **AI usage this revision:** $0.0094 across 3 live calls (Smart ×2, Fast Revise ×1). Fixture checks were free.
+
+## 2026-10-16: correction pass (placement, chain, Accept newline, history, Enter flow, sound)
+
+**Causes:**
+- The model returned `"Eduardo shipped\n"` for an inline selection, so Accept inserted a soft line break.
+- An Enter submission recorded two Undo steps.
+- Flex-wrapped reflections were each linked to the main bubble.
+- The passage dots ignored minimized reviews.
+- The refresh-once guard was not persisted.
+
+**Fixes:**
+- Narrow removal of a single accidental boundary break.
+- A submission-scoped history merge (never across other actions or Undo), and creation joined with the first reflection.
+- A geometry module for the wrapping chain, obstacle-routed dots and envelope-aware marker slots.
+- The supplied pop recording.
+
+**Checks:** Vitest 28/28 and xUnit 14/14, plus the browser verification listed in the README. In the hidden browser
+pane, CSS animations and ResizeObserver callbacks were throttled, so geometry was also audited from resting bounds
+plus the motion envelope; a window-resize re-layout was added for robustness.
+
+**AI usage:** $0.00038 across 2 live Fast calls.

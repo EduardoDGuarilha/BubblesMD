@@ -3,6 +3,7 @@ import { effectiveText } from '../core/changes';
 import { isCurrent, type CandidateVersion, type ReviewState, type Thought } from '../core/workspace';
 import type { RequestState, StoreState, WorkspaceStore } from '../state/store';
 import { renderCandidate } from './candidateHtml';
+import { chainDots, layoutChain } from '../core/geometry';
 import { formatCost } from './format';
 import { rupture, ruptureAll } from './fx';
 import { PlusIcon } from './PlusIcon';
@@ -17,6 +18,8 @@ interface Props {
   onBackToPassage(): void;
   onRetarget(): void;
   onHoverChange(changeId: string | null): void;
+  /** Called after the chain is re-laid out, so the passage connector can be re-routed. */
+  onGeometryChange?(): void;
 }
 
 const isSubmitKey = (e: KeyboardEvent) => e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229;
@@ -25,8 +28,12 @@ const isSubmitKey = (e: KeyboardEvent) => e.key === 'Enter' && !e.shiftKey && !e
  * One review family: the suggestion bubble with its reflections clustered beneath it. Every bubble sizes to its
  * content. Enter on a reflection submits it (first → initial suggestion, later → updated suggestion).
  */
-export function ReviewFamily({ store, state, review, raw, hovered, offscreen, onBackToPassage, onRetarget, onHoverChange }: Props) {
+export function ReviewFamily({ store, state, review, raw, hovered, offscreen, onBackToPassage, onRetarget, onHoverChange, onGeometryChange }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const chainRef = useRef<HTMLDivElement>(null);
+  const geometryRef = useRef(onGeometryChange);
+  geometryRef.current = onGeometryChange;
+  const signatureRef = useRef('');
   const version = review.activeVersion ? state.versions[review.activeVersion] : null;
   const request: RequestState | undefined = state.requests[review.id];
   const generating = request?.status === 'generating';
@@ -46,6 +53,72 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
     ruptureAll(rootRef.current);
     store.discard(review.id);
   };
+
+  // The reflections form one chain (suggestion → first → next → … → +) laid out from their measured sizes, with
+  // connector dots computed from the actual edges. Re-run on every render and whenever any item resizes.
+  const relayout = () => {
+    const chain = chainRef.current;
+    if (!chain) return;
+    const items = [...chain.querySelectorAll<HTMLElement>(':scope > .chain-item')];
+    const layout = layoutChain(
+      items.map((el) => ({ w: el.offsetWidth, h: el.offsetHeight })),
+      chain.clientWidth,
+    );
+    items.forEach((el, i) => {
+      el.style.left = `${layout.rects[i].x}px`;
+      el.style.top = `${layout.rects[i].y}px`;
+    });
+    chain.style.height = `${layout.height}px`;
+    const main = rootRef.current?.querySelector<HTMLElement>(':scope > .review');
+    const mainRect = main
+      ? { x: main.offsetLeft - chain.offsetLeft, y: main.offsetTop - chain.offsetTop, w: main.offsetWidth, h: main.offsetHeight }
+      : null;
+    const svg = chain.querySelector(':scope > .chain-dots');
+    if (svg) {
+      svg.replaceChildren(
+        ...chainDots(mainRect, layout).map((d) => {
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('cx', d.x.toFixed(1));
+          c.setAttribute('cy', d.y.toFixed(1));
+          c.setAttribute('r', d.r.toFixed(1));
+          c.setAttribute('class', 'thought-dot');
+          return c;
+        }),
+      );
+    }
+    // Notify only real geometry changes (the passage connector is re-routed), never on every render.
+    const signature = JSON.stringify([layout.rects, mainRect, chain.clientWidth]);
+    if (signature !== signatureRef.current) {
+      signatureRef.current = signature;
+      geometryRef.current?.();
+    }
+  };
+  const relayoutRef = useRef(relayout);
+  relayoutRef.current = relayout;
+  useLayoutEffect(() => relayoutRef.current());
+  useEffect(() => {
+    const chain = chainRef.current;
+    if (!chain) return;
+    const ro = new ResizeObserver(() => relayoutRef.current());
+    const observe = () => {
+      ro.disconnect();
+      ro.observe(chain);
+      chain.querySelectorAll(':scope > .chain-item').forEach((el) => ro.observe(el));
+      const main = rootRef.current?.querySelector(':scope > .review');
+      if (main) ro.observe(main);
+    };
+    observe();
+    const mo = new MutationObserver(observe);
+    mo.observe(chain, { childList: true });
+    // Window resizes re-wrap text; re-lay out directly too rather than relying on ResizeObserver timing alone.
+    const onResize = () => relayoutRef.current();
+    window.addEventListener('resize', onResize);
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
 
   return (
     <div className="family-inner" ref={rootRef}>
@@ -80,7 +153,8 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
           .
         </div>
       )}
-      <div className={`thoughts${version || request ? '' : ' draft'}`}>
+      <div ref={chainRef} className={`chain${version || request ? '' : ' draft'}`}>
+        <svg className="chain-dots" aria-hidden="true" />
         {review.thoughts.map((t, i) => (
           <ThoughtBubble
             key={t.id}
@@ -114,7 +188,7 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
         {!adding && (
           <button
             type="button"
-            className="bubble add-thought"
+            className="bubble add-thought chain-item"
             aria-label="Add a reflection"
             title="Add a reflection (Enter submits it)"
             disabled={generating}
@@ -158,9 +232,9 @@ function MainBubble({
   const current = version ? isCurrent(state.tracked, review, version) : false;
   const effective = version ? effectiveText(version.diff, review.popped) : '';
   const nothing = !!version && effective === version.source;
-  const thoughtsChanged =
-    !!version &&
-    JSON.stringify(review.thoughts.map((t) => t.text.trim()).filter(Boolean)) !== JSON.stringify(version.thoughts.map((t) => t.trim()));
+  // Derived, never recorded: reflections the active suggestion was not generated from.
+  const applied = new Set((version?.thoughts ?? []).map((t) => t.trim()));
+  const unapplied = version ? review.thoughts.map((t) => t.text.trim()).filter((t) => t && !applied.has(t)) : [];
   const canAccept = !!version && current && !nothing && !generating;
   const hasThoughts = review.thoughts.some((t) => t.text.trim());
   const canSuggest = !generating && !busyElsewhere && hasThoughts && !review.blocked;
@@ -170,12 +244,14 @@ function MainBubble({
   let heading = 'Possible revision';
   if (generating) heading = request.action === 'revise' ? 'Revising for flow…' : version ? 'Updating the suggestion…' : 'Thinking about your reflections…';
   else if (!version && failed) heading = request.status === 'interrupted' ? 'Interrupted' : 'No suggestion yet';
+  else if (version && failed) heading = request.status === 'interrupted' ? 'Update interrupted — previous suggestion shown' : 'Update failed — previous suggestion shown';
 
   const chips: string[] = [];
   if (version && !generating) {
     if (review.blocked) chips.push('Needs retarget');
     else if (!current) chips.push('Outdated — the passage changed');
-    if (thoughtsChanged) chips.push('Thoughts changed');
+    if (unapplied.length)
+      chips.push(`Not yet applied: “${unapplied[0].length > 36 ? `${unapplied[0].slice(0, 35)}…` : unapplied[0]}”${unapplied.length > 1 ? ` +${unapplied.length - 1}` : ''}`);
     if (nothing) chips.push('Nothing to apply');
     for (const check of version.checks ?? []) chips.push(check);
   }
@@ -196,7 +272,7 @@ function MainBubble({
       {chips.length > 0 && (
         <div className="chips">
           {chips.map((c) => (
-            <span key={c} className={`chip${c.startsWith('Changed wording') || c.startsWith('Re-added') ? ' warn' : ''}`}>
+            <span key={c} className={`chip${c.startsWith('Changed wording') || c.startsWith('Re-added') || c.startsWith('Not yet applied') ? ' warn' : ''}`}>
               {c}
             </span>
           ))}
@@ -400,8 +476,14 @@ function ThoughtBubble({
   const ref = useRef<HTMLElement>(null);
   const submitted = useRef(false);
   useEffect(() => setText(thought.text), [thought.text]);
+  const pending = text !== thought.text;
   return (
-    <section ref={ref} className="bubble thought" aria-label={`Reflection ${index + 1}`}>
+    <section
+      ref={ref}
+      className={`bubble thought chain-item${pending ? ' pending' : ''}`}
+      aria-label={`Reflection ${index + 1}`}
+      title={pending ? 'Not sent yet — Enter sends it, Shift+Enter adds a line' : undefined}
+    >
       <GrowArea
         value={text}
         readOnly={locked}
@@ -459,7 +541,11 @@ function NewThought({
   };
   useEffect(() => ref.current?.focus(), []);
   return (
-    <section className="bubble thought new" aria-label={first ? 'First reflection' : 'New reflection'}>
+    <section
+      className="bubble thought new pending chain-item"
+      aria-label={first ? 'First reflection' : 'New reflection'}
+      title="Enter sends it · Shift+Enter adds a line"
+    >
       <GrowArea
         textareaRef={ref}
         value={text}

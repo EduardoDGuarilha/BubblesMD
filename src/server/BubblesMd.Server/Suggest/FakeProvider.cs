@@ -29,6 +29,8 @@ public sealed partial class FakeProvider : ISuggestionProvider
         if (notes.Contains("#unchanged")) return Result("unchanged", "", "Fixture: already fine.");
         if (notes.Contains("#cannot")) return Result("cannot_apply", "", "Fixture: cannot apply.");
         if (notes.Contains("#delete")) return Result("replace", "", "Fixture: delete the selection.");
+        // Reproduces the observed model artifact: a correct inline replacement with a stray trailing newline.
+        if (notes.Contains("#newline")) return Result("replace", "Eduardo shipped\n", "Fixture: trailing newline.");
 
         var baseline = SuggestOrchestrator.Baseline(request);
         if (notes.Contains("#stubborn") || (notes.Contains("#same") && !prompt.IsCorrection))

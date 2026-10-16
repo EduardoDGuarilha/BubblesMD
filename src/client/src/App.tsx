@@ -11,7 +11,7 @@ import { EMPTY_SPEC, type DecorationSpec, type EditorCallbacks, type EditorHandl
 import { Landing } from './ui/Landing';
 import { ReviewLayer } from './ui/ReviewLayer';
 import { Toolbar } from './ui/Toolbar';
-import { playPop } from './ui/sound';
+import { playPop, preloadPop } from './ui/sound';
 import { rupture } from './ui/fx';
 
 const MAX_IMPORT = 1_048_576;
@@ -49,6 +49,11 @@ export function App({ store }: { store: WorkspaceStore }) {
   }, []);
   // One soap-bubble pop sound per store pop event (the rupture animation is drawn by the UI on the popped element).
   useEffect(() => store.onEvent((e) => e.type === 'pop' && !store.state.prefs.muted && playPop()), [store]);
+  // Decode the recorded pop on the first gesture (audio contexts need one).
+  useEffect(() => {
+    window.addEventListener('pointerdown', preloadPop, { once: true });
+    return () => window.removeEventListener('pointerdown', preloadPop);
+  }, []);
   useEffect(() => {
     document.title = state.hasDocument ? `${state.doc.title || 'Untitled'} — Bubbles.MD` : 'Bubbles.MD';
   }, [state.hasDocument, state.doc.title]);

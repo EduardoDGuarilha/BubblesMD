@@ -82,7 +82,10 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
     }
     const index = String.fromCharCode(INDEX_BASE + live.length);
     live.push(g);
-    text += g.kind === 'deleted' ? POINT + index : START + index + g.replacement + END;
+    // Deletions and whitespace-only changes (e.g. a line break) get a visible, poppable marker.
+    if (g.kind === 'deleted') text += POINT + index;
+    else if (!g.replacement.trim()) text += POINT + index + g.replacement;
+    else text += START + index + g.replacement + END;
   }
 
   const doc = document.implementation.createHTMLDocument('candidate');
@@ -123,7 +126,8 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
         const g = live[code - INDEX_BASE];
         if (g) {
           seen.add(g.id);
-          if (expectIndex === 'point') frag.append(markerEl(doc, g, '', 'gap'));
+          if (expectIndex === 'point')
+            frag.append(g.kind === 'deleted' ? markerEl(doc, g, '', 'gap') : markerEl(doc, g, g.replacement.includes('\n') ? '↵' : '␣', 'ws'));
           else current = g;
         }
         expectIndex = null;

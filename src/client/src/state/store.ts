@@ -1,5 +1,5 @@
 import { History } from '../core/history';
-import { diffCandidate, effectiveText, isUnchanged, keepOriginalChecks } from '../core/changes';
+import { diffCandidate, effectiveText, isUnchanged, keepOriginalChecks, stripAccidentalBoundaryBreaks } from '../core/changes';
 import type { Hunk } from '../core/textChanges';
 import {
   acceptReview,
@@ -96,8 +96,8 @@ export interface StoreState {
   notice: Notice | null;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
   saveError: string | null;
-  /** Source text for which an outdated review already triggered its one automatic refresh. */
-  autoRefreshed: Record<string, string>;
+  /** Per review: fingerprints of outdated states that already triggered their one automatic refresh (persisted). */
+  autoRefreshed: Record<string, string[]>;
 }
 
 export interface Persisted {
@@ -110,6 +110,7 @@ export interface Persisted {
   ledger: LedgerEntry[];
   decisions: DecisionEntry[];
   prefs: Prefs;
+  autoRefreshed?: Record<string, string[]>;
 }
 
 export interface PersistAdapter {
@@ -134,6 +135,28 @@ interface Capture {
   revision: number;
   /** What the result must differ from: the selection (initial/refresh) or the effective proposal (refine/revise). */
   baseline: string;
+  /** Set for Enter submissions: the resulting suggestion joins the submission's Undo step if nothing intervened. */
+  submission?: { id: string; mutation: number };
+}
+
+/** Small stable hash for refresh fingerprints (FNV-1a, 32-bit). */
+function fingerprint(...parts: string[]): string {
+  let h = 0x811c9dc5;
+  for (const ch of parts.join('\u0000')) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+interface CommitOptions {
+  label: string;
+  group?: string;
+  /** Record this state as the entry's before-state instead of the current one (review creation joins its first reflection). */
+  before?: Tracked;
+  submission?: string;
+  /** Join the history entry of this submission instead of recording a new step, when still valid. */
+  mergeInto?: { id: string; mutation: number };
 }
 
 export class WorkspaceStore {
@@ -142,7 +165,8 @@ export class WorkspaceStore {
   private eventListeners = new Set<(e: StoreEvent) => void>();
   private history = new History<Tracked>();
   private controllers = new Map<string, AbortController>();
-  private lastCreation: { reviewId: string; before: Tracked } | null = null;
+  /** A just-created review has no Undo step of its own until its first reflection is committed. */
+  private pendingCreation: { reviewId: string; before: Tracked } | null = null;
   private noticeSeq = 0;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private saving: Promise<void> = Promise.resolve();
@@ -216,18 +240,33 @@ export class WorkspaceStore {
     this.set({ notice: null }, false);
   }
 
-  /** Record a tracked change as one history entry (or merge into the current typing group). */
-  private commit(next: Tracked, group?: string, extra: Partial<StoreState> = {}) {
+  /**
+   * Record a tracked change as one history entry, merge it into the current typing group, or join the Undo step
+   * of the submission that produced it. Only these committed changes enter history; UI state never does.
+   */
+  private commit(next: Tracked, opts: CommitOptions, extra: Partial<StoreState> = {}) {
     if (next === this.state.tracked) {
       if (Object.keys(extra).length) this.set(extra);
       return false;
     }
-    this.history.record(this.state.tracked, group);
-    if (!group) this.history.breakGroup();
+    if (this.pendingCreation && !opts.before) {
+      // Any other change after a creation gives the creation its own step first.
+      this.history.record(this.pendingCreation.before, { label: 'create review' });
+      this.pendingCreation = null;
+    }
+    const merge = opts.mergeInto && this.history.canMerge(opts.mergeInto.id, opts.mergeInto.mutation);
+    if (!merge) {
+      this.history.record(opts.before ?? this.state.tracked, { label: opts.label, group: opts.group, submission: opts.submission });
+      if (!opts.group) this.history.breakGroup();
+    }
     const revision = next.md !== this.state.tracked.md ? this.state.revision + 1 : this.state.revision;
-    this.lastCreation = null;
     this.set({ tracked: next, revision, ...extra });
     return true;
+  }
+
+  /** Undo entry labels, oldest first (inspection and tests). */
+  historyLabels(): string[] {
+    return this.history.describe();
   }
 
   // ---- document -----------------------------------------------------------------------------------------------
@@ -237,7 +276,7 @@ export class WorkspaceStore {
     for (const c of this.controllers.values()) c.abort();
     this.controllers.clear();
     this.history.clear();
-    this.lastCreation = null;
+    this.pendingCreation = null;
     this.set({
       hasDocument: true,
       doc,
@@ -266,7 +305,7 @@ export class WorkspaceStore {
       if (this.state.expanded && deleted.includes(this.state.expanded)) extra.expanded = null;
       for (const id of deleted) this.cancelRequest(id);
     }
-    this.commit(next, deleted.length ? undefined : 'typing', extra);
+    this.commit(next, deleted.length ? { label: 'edit (passage deleted)' } : { label: 'typing', group: 'typing' }, extra);
     if (deleted.length) {
       this.emit({ type: 'pop' });
       this.notify(deleted.length === 1 ? 'Passage deleted — its review popped.' : 'Passages deleted — their reviews popped.', {
@@ -282,6 +321,13 @@ export class WorkspaceStore {
   // ---- history ------------------------------------------------------------------------------------------------
 
   undo() {
+    if (this.pendingCreation) {
+      // Undo while an untouched new review is open simply removes it.
+      const before = this.pendingCreation.before;
+      this.pendingCreation = null;
+      this.restore(before);
+      return;
+    }
     const prev = this.history.undo(this.state.tracked);
     if (prev) this.restore(prev);
   }
@@ -304,7 +350,7 @@ export class WorkspaceStore {
     let expanded = this.state.expanded;
     if (expanded && next.reviews[expanded]?.status !== 'open') expanded = null;
     if (reopened) expanded = reopened;
-    this.lastCreation = null;
+    this.pendingCreation = null;
     this.set({
       tracked: next,
       decisions,
@@ -318,9 +364,10 @@ export class WorkspaceStore {
   createReview(from: number, to: number): string | null {
     if (from < 0 || to > this.state.tracked.md.length || from >= to) return null;
     const id = uid();
+    if (this.pendingCreation) this.cancelIfEmptyDraft(this.pendingCreation.reviewId);
     const before = this.state.tracked;
-    this.commit(createReview(before, id, from, to), undefined, { expanded: id });
-    this.lastCreation = { reviewId: id, before };
+    this.pendingCreation = { reviewId: id, before };
+    this.set({ tracked: createReview(before, id, from, to), expanded: id });
     return id;
   }
 
@@ -346,31 +393,42 @@ export class WorkspaceStore {
     if (!r || !v || r.blocked || isCurrent(tracked, r, v)) return;
     const req = requests[reviewId];
     if (req) return; // generating, or failed/interrupted: explicit Retry only
-    const source = tracked.md.slice(r.from, r.to);
-    if (autoRefreshed[reviewId] === source) return;
+    // One paid refresh per outdated state: the fingerprint covers the active version, the passage and its context.
+    const near = nearContext(tracked.md, r.from, r.to);
+    const fp = fingerprint(v.id, tracked.md.slice(r.from, r.to), near.nearBefore, near.nearAfter);
+    const seen = autoRefreshed[reviewId] ?? [];
+    if (seen.includes(fp)) return;
     if (this.state.activeRequest) {
       this.notify('Busy — another suggestion is generating. Refresh this one when it finishes.');
       return;
     }
-    this.set({ autoRefreshed: { ...autoRefreshed, [reviewId]: source } }, false);
+    this.set({ autoRefreshed: { ...autoRefreshed, [reviewId]: [...seen, fp].slice(-8) } });
     this.requestSuggestion(reviewId, 'refresh');
   }
 
   private cancelIfEmptyDraft(reviewId: string) {
     const r = this.state.tracked.reviews[reviewId];
     if (!r || r.status !== 'open' || r.thoughts.length || r.activeVersion || this.state.requests[reviewId]) return;
-    if (this.lastCreation?.reviewId === reviewId && this.history.dropIfTop(this.lastCreation.before)) {
-      const before = this.lastCreation.before;
-      this.lastCreation = null;
-      this.set({ tracked: before, expanded: null });
+    if (this.pendingCreation?.reviewId === reviewId) {
+      // Never recorded: removing it leaves history untouched.
+      const before = this.pendingCreation.before;
+      this.pendingCreation = null;
+      this.set({ tracked: before, expanded: this.state.expanded === reviewId ? null : this.state.expanded });
       return;
     }
-    this.commit(setStatus(this.state.tracked, reviewId, 'discarded'), undefined, { expanded: null });
+    this.commit(setStatus(this.state.tracked, reviewId, 'discarded'), { label: 'discard empty review' }, { expanded: null });
   }
 
-  commitThought(reviewId: string, thoughtId: string | null, text: string): string | null {
+  commitThought(reviewId: string, thoughtId: string | null, text: string, submission?: string): string | null {
     const id = uid();
-    const changed = this.commit(commitThought(this.state.tracked, reviewId, thoughtId, text, id));
+    const next = commitThought(this.state.tracked, reviewId, thoughtId, text, id);
+    const creation = this.pendingCreation?.reviewId === reviewId ? this.pendingCreation : null;
+    if (creation && next !== this.state.tracked) this.pendingCreation = null;
+    const changed = this.commit(next, {
+      label: thoughtId === null ? (submission ? 'submit reflection' : 'add reflection') : 'edit reflection',
+      before: creation && next !== this.state.tracked ? creation.before : undefined,
+      submission,
+    });
     return changed && thoughtId === null ? id : null;
   }
 
@@ -382,13 +440,17 @@ export class WorkspaceStore {
   submitReflection(reviewId: string, thoughtId: string | null, text: string) {
     const before = this.state.tracked.reviews[reviewId];
     const previous = thoughtId ? before?.thoughts.find((t) => t.id === thoughtId)?.text : undefined;
-    this.commitThought(reviewId, thoughtId, text);
+    const submission = uid();
+    const tracked0 = this.state.tracked;
+    this.commitThought(reviewId, thoughtId, text, submission);
+    // The suggestion this submission produces joins its Undo step, but only while nothing else intervenes.
+    const merge = this.state.tracked !== tracked0 ? { id: submission, mutation: this.history.mutation } : undefined;
     const r = this.state.tracked.reviews[reviewId];
     if (!r || r.status !== 'open' || this.isGenerating(reviewId)) return;
     const changed = thoughtId === null ? text.trim() !== '' : previous !== undefined && previous.trim() !== text.trim();
     const v = r.activeVersion ? this.state.versions[r.activeVersion] : null;
     if (!v) {
-      if (r.thoughts.some((t) => t.text.trim())) this.requestSuggestion(reviewId, 'initial');
+      if (r.thoughts.some((t) => t.text.trim())) this.requestSuggestion(reviewId, 'initial', merge);
       return;
     }
     if (!changed) return;
@@ -396,7 +458,7 @@ export class WorkspaceStore {
       this.notify('Busy — your reflection is saved. Use Suggest when the other suggestion finishes.');
       return;
     }
-    this.requestSuggestion(reviewId, isCurrent(this.state.tracked, r, v) ? 'refine' : 'refresh');
+    this.requestSuggestion(reviewId, isCurrent(this.state.tracked, r, v) ? 'refine' : 'refresh', merge);
   }
 
   /** Explicit coherence repair after popping individual edits; popping alone never calls the model. */
@@ -409,12 +471,12 @@ export class WorkspaceStore {
 
   popThought(reviewId: string, thoughtId: string) {
     if (this.isGenerating(reviewId)) return;
-    if (this.commit(popThought(this.state.tracked, reviewId, thoughtId))) this.emit({ type: 'pop' });
+    if (this.commit(popThought(this.state.tracked, reviewId, thoughtId), { label: 'pop reflection' })) this.emit({ type: 'pop' });
   }
 
   popChange(reviewId: string, changeId: string) {
     if (this.isGenerating(reviewId)) return;
-    if (this.commit(popChange(this.state.tracked, reviewId, changeId))) {
+    if (this.commit(popChange(this.state.tracked, reviewId, changeId), { label: 'pop change' })) {
       this.emit({ type: 'pop' });
       this.notify('Change popped — the original wording stays in the suggestion.', { undo: true });
     }
@@ -426,7 +488,7 @@ export class WorkspaceStore {
     if (!r || r.status !== 'open') return;
     this.cancelRequest(reviewId);
     const decisions = r.activeVersion ? [...this.state.decisions, this.decision(reviewId, 'rejected')] : this.state.decisions;
-    this.commit(setStatus(this.state.tracked, reviewId, 'discarded'), undefined, {
+    this.commit(setStatus(this.state.tracked, reviewId, 'discarded'), { label: 'discard review' }, {
       expanded: this.state.expanded === reviewId ? null : this.state.expanded,
       decisions,
     });
@@ -443,7 +505,7 @@ export class WorkspaceStore {
       this.notify(res.reason, { tone: 'error' });
       return;
     }
-    this.commit(res.next, undefined, {
+    this.commit(res.next, { label: 'accept' }, {
       expanded: null,
       decisions: [...this.state.decisions, this.decision(reviewId, 'accepted', res.next)],
     });
@@ -455,7 +517,7 @@ export class WorkspaceStore {
       this.notify('Select the passage this review should target, then choose Retarget.', { tone: 'error' });
       return;
     }
-    this.commit(retarget(this.state.tracked, reviewId, from, to));
+    this.commit(retarget(this.state.tracked, reviewId, from, to), { label: 'retarget' });
   }
 
   // ---- requests -----------------------------------------------------------------------------------------------
@@ -473,7 +535,7 @@ export class WorkspaceStore {
     this.set({ prefs: { ...this.state.prefs, ...patch } });
   }
 
-  requestSuggestion(reviewId: string, action: SuggestAction): 'started' | 'busy' | 'invalid' {
+  requestSuggestion(reviewId: string, action: SuggestAction, submission?: { id: string; mutation: number }): 'started' | 'busy' | 'invalid' {
     const { tracked, versions, activeRequest } = this.state;
     if (activeRequest) {
       this.notify('Busy — one suggestion at a time.');
@@ -509,6 +571,7 @@ export class WorkspaceStore {
     const mode = this.state.prefs.mode;
     const capture: Capture = {
       baseline: action === 'refine' || action === 'revise' ? effective : source,
+      submission,
       requestId,
       reviewId,
       action,
@@ -594,7 +657,8 @@ export class WorkspaceStore {
     }
     const requests = { ...this.state.requests };
     delete requests[c.reviewId];
-    const replacement = res.replacement ?? '';
+    // A stray line break at an inline boundary (a model artifact) would split the paragraph on Accept.
+    const replacement = stripAccidentalBoundaryBreaks(c.source, res.replacement ?? '');
     const unchanged = res.outcome === 'unchanged' || (res.outcome === 'replace' && isUnchanged(c.baseline, replacement));
     if (res.outcome !== 'replace' || unchanged) {
       // Never install a non-result: the previous proposal and reflections stay as they are.
@@ -639,7 +703,7 @@ export class WorkspaceStore {
       checks: keepOriginalChecks(replacement, c.keepOriginal),
     };
     this.set({ ...base, ledger, requests, versions: { ...this.state.versions, [version.id]: version } }, false);
-    this.commit(installVersion(this.state.tracked, c.reviewId, version.id));
+    this.commit(installVersion(this.state.tracked, c.reviewId, version.id), { label: 'suggestion', mergeInto: c.submission });
     const r = this.state.tracked.reviews[c.reviewId];
     if (!isCurrent(this.state.tracked, r, version)) {
       this.notify('The passage changed while this suggestion was generating, so it is outdated. Use Suggest to refresh it.');
@@ -722,6 +786,7 @@ export class WorkspaceStore {
         ledger,
         decisions: saved.decisions ?? [],
         prefs: { ...this.state.prefs, ...saved.prefs },
+        autoRefreshed: saved.autoRefreshed ?? {},
         saveStatus: 'saved',
         saveError,
       };
@@ -743,6 +808,7 @@ export class WorkspaceStore {
       ledger: s.ledger,
       decisions: s.decisions,
       prefs: s.prefs,
+      autoRefreshed: s.autoRefreshed,
     };
   }
 

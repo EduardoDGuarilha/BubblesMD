@@ -140,3 +140,22 @@ export function keepOriginalChecks(replacement: string, keep: readonly { origina
   }
   return checks;
 }
+
+const SINGLE_BREAK_RUN = /^[ \t]*\n[ \t]*$/;
+
+/**
+ * Inline selections only: drop a leading or trailing whitespace run that holds exactly one line break the selected
+ * source does not have at that boundary. That is a model artifact which, accepted mid-paragraph, renders as a line
+ * break. Blank-line paragraph breaks, internal newlines, horizontal spacing and empty replacements are left as is.
+ */
+export function stripAccidentalBoundaryBreaks(source: string, replacement: string): string {
+  if (!replacement.trim()) return replacement;
+  let out = replacement;
+  const lead = /^\s*/.exec(out)![0];
+  const srcLead = /^\s*/.exec(source)![0];
+  if (lead && SINGLE_BREAK_RUN.test(lead) && !srcLead.includes('\n')) out = srcLead + out.slice(lead.length);
+  const trail = /\s*$/.exec(out)![0];
+  const srcTrail = /\s*$/.exec(source)![0];
+  if (trail && SINGLE_BREAK_RUN.test(trail) && !srcTrail.includes('\n')) out = out.slice(0, out.length - trail.length) + srcTrail;
+  return out;
+}

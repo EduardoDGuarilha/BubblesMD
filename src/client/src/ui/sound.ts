@@ -1,5 +1,68 @@
 let ctx: AudioContext | null = null;
+let recording: AudioBuffer | null = null;
+let recordingOffset = 0;
+let loading: Promise<void> | null = null;
 let noise: AudioBuffer | null = null;
+
+const POP_URL = '/sounds/bubble-pop.mp3';
+
+function context(): AudioContext {
+  ctx ??= new AudioContext();
+  if (ctx.state === 'suspended') void ctx.resume();
+  return ctx;
+}
+
+/** Seconds of near-silence before the pop transient, so playback lines up with the rupture animation. */
+function leadingSilence(buffer: AudioBuffer): number {
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) if (Math.abs(data[i]) > 0.02) return Math.max(0, i / buffer.sampleRate - 0.002);
+  return 0;
+}
+
+/** Decode the supplied bubble-pop recording once (the first user gesture is a good moment). */
+export function preloadPop() {
+  if (loading) return;
+  try {
+    const audio = context();
+    loading = fetch(POP_URL)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => audio.decodeAudioData(data))
+      .then((buffer) => {
+        recording = buffer;
+        recordingOffset = leadingSilence(buffer);
+      })
+      .catch(() => {
+        recording = null;
+      });
+  } catch {
+    /* no audio */
+  }
+}
+
+/** Whether the recorded pop has been decoded (inspection only). */
+export function popRecordingReady(): boolean {
+  return recording !== null;
+}
+
+/** One soap-bubble pop: the supplied recording, or a synthesized pop until/unless it can be decoded. */
+export function playPop() {
+  try {
+    const audio = context();
+    if (!recording) {
+      preloadPop();
+      synthesizedPop(audio);
+      return;
+    }
+    const source = audio.createBufferSource();
+    source.buffer = recording;
+    const gain = audio.createGain();
+    gain.gain.value = 0.8;
+    source.connect(gain).connect(audio.destination);
+    source.start(0, recordingOffset);
+  } catch {
+    /* audio unavailable: silent */
+  }
+}
 
 function noiseBuffer(audio: AudioContext): AudioBuffer {
   if (noise && noise.sampleRate === audio.sampleRate) return noise;
@@ -10,48 +73,21 @@ function noiseBuffer(audio: AudioContext): AudioBuffer {
   return noise;
 }
 
-/**
- * A short soap-bubble pop, synthesized: a sharp broadband burst (the film tearing), band-passed high and decaying
- * in ~25 ms, plus a faint, very fast falling "plip" from the air release. No sustained tone, no audio files.
- * Slightly randomized so repeated pops do not sound identical.
- */
-export function playPop() {
-  try {
-    ctx ??= new AudioContext();
-    if (ctx.state === 'suspended') void ctx.resume();
-    const t = ctx.currentTime + 0.005;
-    const jitter = 0.85 + Math.random() * 0.3;
-
-    const burst = ctx.createBufferSource();
-    burst.buffer = noiseBuffer(ctx);
-    const band = ctx.createBiquadFilter();
-    band.type = 'bandpass';
-    band.frequency.setValueAtTime(3200 * jitter, t);
-    band.frequency.exponentialRampToValueAtTime(1800 * jitter, t + 0.03);
-    band.Q.value = 0.9;
-    const high = ctx.createBiquadFilter();
-    high.type = 'highpass';
-    high.frequency.value = 700;
-    const burstGain = ctx.createGain();
-    burstGain.gain.setValueAtTime(0.0001, t);
-    burstGain.gain.exponentialRampToValueAtTime(0.55, t + 0.0015);
-    burstGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.028);
-    burst.connect(band).connect(high).connect(burstGain).connect(ctx.destination);
-    burst.start(t);
-    burst.stop(t + 0.05);
-
-    const plip = ctx.createOscillator();
-    plip.type = 'sine';
-    plip.frequency.setValueAtTime(1500 * jitter, t);
-    plip.frequency.exponentialRampToValueAtTime(420 * jitter, t + 0.022);
-    const plipGain = ctx.createGain();
-    plipGain.gain.setValueAtTime(0.0001, t);
-    plipGain.gain.exponentialRampToValueAtTime(0.08, t + 0.002);
-    plipGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
-    plip.connect(plipGain).connect(ctx.destination);
-    plip.start(t);
-    plip.stop(t + 0.04);
-  } catch {
-    /* audio unavailable: silent */
-  }
+/** Fallback: a short filtered noise burst with a fast decay (no sustained tone). */
+function synthesizedPop(audio: AudioContext) {
+  const t = audio.currentTime + 0.005;
+  const burst = audio.createBufferSource();
+  burst.buffer = noiseBuffer(audio);
+  const band = audio.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.setValueAtTime(3200, t);
+  band.frequency.exponentialRampToValueAtTime(1800, t + 0.03);
+  band.Q.value = 0.9;
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.5, t + 0.0015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.028);
+  burst.connect(band).connect(gain).connect(audio.destination);
+  burst.start(t);
+  burst.stop(t + 0.05);
 }

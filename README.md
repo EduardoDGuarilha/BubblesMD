@@ -41,8 +41,8 @@ npm --prefix src/client install; npm --prefix src/client run dev   # UI on http:
 
 **Zero-cost fixture mode:** start the server with `--Bubbles:Provider=fake`. The fake provider deterministically
 alters, deletes and adds words. These reflection keywords drive failure cases: `#slow`, `#fail`, `#malformed`,
-`#unchanged`, `#cannot`, `#delete`, `#same` (no change at first, a real change after the correction) and `#stubborn`
-(no change even after the correction).
+`#unchanged`, `#cannot`, `#delete`, `#same` (no change at first, a real change after the correction), `#stubborn`
+(no change even after the correction) and `#newline` (a replacement with a stray trailing line break).
 
 **Checks:** `npm --prefix src/client test` (Vitest) and `dotnet test src/server/BubblesMd.slnx` (xUnit).
 
@@ -119,9 +119,15 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
   - It makes no other retries or model fallbacks. `GET /api/config` lists modes and rates.
 - **Bubbles.** Soap-film surfaces (translucent fill, thin rim, a masked iridescent ring and a glint) are sized to their
   content.
-  - Thought dots are drawn on an overlay from the passage's line to the bubble after every layout pass.
-  - Floating pauses under the pointer, and nearby minimized reviews cluster.
-  - Pops play a synthesized soap-bubble pop (filtered noise burst) with a short rupture animation.
+  - Reflections form one wrapping chain laid out from measured sizes (`core/geometry.ts`); dots link consecutive
+    bubbles from their real edges, through the gaps between them.
+  - The passage → bubble dots are routed around minimized reviews and the family's other bubbles, or omitted.
+  - Spacing includes the animation envelope (float, inflate overshoot, hover scale), and minimized reviews take the
+    nearest free slot beside their passage.
+  - Floating pauses under the pointer.
+  - Pops play the supplied recording `public/sounds/bubble-pop.mp3` (Universfield, "bubble pop 02"; file supplied by
+    Eduardo, license to be confirmed before publishing) with a short rupture animation, falling back to a synthesized
+    pop if it cannot be decoded.
 - **Persistence.** One versioned snapshot is stored in IndexedDB (idb-keyval) with serialized writes. "Saved" shows
   only after a write completes; a failed write shows "Not saved" and keeps the document usable and exportable.
 
@@ -138,7 +144,7 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 ## Verification performed
 
 Automated:
-- **Vitest (20):**
+- **Vitest (28):** (8 added in the correction pass: newline, history steps, refresh guard, geometry)
   - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
     lists, Markdown-looking code, cross-block selections, loud failure.
   - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
@@ -193,6 +199,31 @@ with unknown cost, well within the $5 key cap.
     first call (53 → 44 words, $0.0048, no correction needed);
   - Fast Revise after keeping one original phrase: coherent repair, nothing flagged ($0.00044). It also reworded one
     later phrase beyond the minimal repair, which shows in the diff.
+
+**Correction pass of 2026-10-16** (placement, chain, Accept newline, Undo steps).
+
+Causes found:
+- Accepting "Eduardo shipped" added a line break because the stored model replacement was `"Eduardo shipped\n"`.
+  Accept applied it exactly; it is now removed for inline selections.
+- Undo landed on "Thoughts changed" because an Enter submission and its suggestion were two separate history entries.
+- Reflections were laid out independently, and their dots and the passage dots ran over other bubbles and minimized
+  reviews.
+
+Verified:
+- **Reproduced each failure first in the dev editor:** two lines after Accept; two entries per Enter refine with Undo
+  landing on "Thoughts changed"; passage dots crossing a minimized review.
+- **Real editor, after the fixes:**
+  - Accept in mid-paragraph stays in one paragraph, and immediate Undo/Redo restores and re-applies with no request.
+  - Enter refine is one Undo step; a failed Enter submission shows "Update failed — previous suggestion shown" with
+    Retry and "Not yet applied".
+  - A multiline reflection grows while typing, with Shift+Enter kept as a newline.
+  - Opening a review beside three minimized reviews.
+  - Bounds measured at 1440, 1024 (also scrolled) and 390: 0 bubble overlaps and 0 dot contacts, including the motion
+    envelope.
+  - The recording decodes in the app; audible playback could not be checked from here.
+- **Live Fast calls ($0.00038):** "it was only eduardo" → "Eduardo shipped", accepted inline; a refine submitted with
+  Enter.
+- **Tests:** Vitest 28/28, xUnit 14/14.
 
 ## Known limitations
 
