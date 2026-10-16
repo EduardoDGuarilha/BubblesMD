@@ -198,6 +198,77 @@ describe('change groups', () => {
   });
 });
 
+describe('change-group boundaries', () => {
+  const exact = (source: string, candidate: string) => {
+    const d = diffCandidate(source, candidate);
+    expect(effectiveText(d, [])).toBe(candidate);
+    expect(effectiveText(d, d.groups.map((g) => g.id))).toBe(source);
+    for (const g of d.groups) expect(source.slice(g.srcFrom, g.srcTo)).toBe(g.original);
+    return d;
+  };
+
+  it('classifies a punctuation-led insertion before a kept space as Added, and keeps real alterations', () => {
+    const comma = exact('of term when he came', 'of term, the kind of day when he came');
+    expect(comma.groups.map((g) => [g.kind, g.original, g.replacement, g.srcFrom])).toEqual([['added', '', ', the kind of day', 7]]);
+    const rainy = exact('It was a rainy Friday afternoon', 'It was a cold, grey, rain-lashed Friday afternoon');
+    expect(rainy.groups.map((g) => [g.kind, g.original, g.replacement])).toEqual([['altered', 'rainy', 'cold, grey, rain-lashed']]);
+  });
+
+  it('keeps real whitespace edits, paragraph breaks and empty replacements as changes', () => {
+    expect(exact('a  b', 'a b').groups.map((g) => [g.kind, g.original])).toEqual([['deleted', ' ']]);
+    expect(exact('a b', 'a\nb').groups.map((g) => [g.kind, g.original, g.replacement])).toEqual([['altered', ' ', '\n']]);
+    expect(exact('One. Two.', 'One.\n\nTwo.').groups.map((g) => g.replacement)).toEqual(['\n\n']);
+    expect(exact('Delete me.', '').groups.map((g) => g.kind)).toEqual(['deleted']);
+  });
+
+  it('accepts exactly the candidate, and exactly the source wording for a popped group', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    const doc = 'It was the end of term when he came.\n';
+    store.newDocument(doc, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, doc.length - 1, 'It was the end of term, the kind of day when he arrived.');
+    const v = store.state.versions[store.state.tracked.reviews[id].activeVersion!];
+    expect(v.diff.groups.map((g) => g.kind)).toEqual(['added', 'altered']);
+    store.popChange(id, v.diff.groups[1].id);
+    store.accept(id);
+    expect(store.state.tracked.md).toBe('It was the end of term, the kind of day when he came.\n');
+  });
+
+  it('reads saved versions with the old boundaries without changing ids, pops, text or making a request', async () => {
+    const s = controlledSuggest();
+    const store = new WorkspaceStore(s.fn);
+    const source = 'of term when he came';
+    store.newDocument(source, { title: 't', fileName: null });
+    const id = await reviewWithCandidate(store, s, 0, source.length, 'of term, the kind of day when he arrived');
+    const snap = store.snapshot();
+    const vid = snap.tracked.reviews[id].activeVersion!;
+    // The diff exactly as the previous grouping saved it: the insertion as an alteration of one space.
+    snap.versions[vid] = {
+      ...snap.versions[vid],
+      diff: {
+        pieces: [{ kind: 'same', text: 'of term' }, { kind: 'change', id: 'c1' }, { kind: 'same', text: 'when he ' }, { kind: 'change', id: 'c2' }],
+        groups: [
+          { id: 'c1', kind: 'altered', srcFrom: 7, srcTo: 8, original: ' ', replacement: ', the kind of day ' },
+          { id: 'c2', kind: 'altered', srcFrom: 16, srcTo: 20, original: 'came', replacement: 'arrived' },
+        ],
+      },
+    };
+    snap.tracked.reviews[id] = { ...snap.tracked.reviews[id], popped: ['c2'] };
+    const calls = s.calls.length;
+    const reloaded = new WorkspaceStore(s.fn, { load: async () => snap, save: async () => {} });
+    await reloaded.load();
+    const groups = reloaded.state.versions[vid].diff.groups;
+    expect(groups.map((g) => [g.id, g.kind, g.srcFrom, g.srcTo])).toEqual([
+      ['c1', 'added', 7, 7],
+      ['c2', 'altered', 16, 20],
+    ]);
+    expect(reloaded.state.tracked.reviews[id].popped).toEqual(['c2']);
+    expect(reloaded.effectiveCandidate(id)).toBe('of term, the kind of day when he came');
+    expect(s.calls.length).toBe(calls);
+    expect(reloaded.state.ledger.length).toBe(store.state.ledger.length);
+  });
+});
+
 describe('reflection submission and no-change handling', () => {
   const attempt = (cost: number) => ({ model: 'test/model', outcome: 'replace', usage: { promptTokens: 1, completionTokens: 1, reasoningTokens: 0, cost }, latencyMs: 1 });
 

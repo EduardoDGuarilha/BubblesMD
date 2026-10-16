@@ -7,14 +7,14 @@ import type { WorkspaceStore } from './state/store';
 import { fetchConfig, type AppConfig } from './services/api';
 import { FormattedEditor, type FormatCommand, type FormattedHandle } from './editor/FormattedEditor';
 import { MarkdownEditor } from './editor/MarkdownEditor';
-import { checkFormattedSupport, scanUnsupported } from './editor/markdownModel';
+import { scanUnsupported } from './editor/markdownModel';
 import { EMPTY_SPEC, type DecorationSpec, type EditorCallbacks, type EditorHandle } from './editor/types';
 import { Landing } from './ui/Landing';
 import { ReviewLayer } from './ui/ReviewLayer';
 import { Toolbar } from './ui/Toolbar';
 import { playPop, preloadPop } from './ui/sound';
 import { rupture } from './ui/fx';
-import { PlusIcon } from './ui/PlusIcon';
+import { CloseIcon, PlusIcon } from './ui/icons';
 
 /** Size of the selection's "+ Bubble" action (fixed in styles.css). */
 const SEL_ACTION = { w: 84, h: 28 };
@@ -195,12 +195,9 @@ function Workspace({
 
   // Formatted mode is read-only only for genuinely unsupported content; normalization is just disclosed.
   const unsupported = useMemo(() => (view === 'formatted' ? scanUnsupported(md) : []), [md, view]);
-  const [normalizes, setNormalizes] = useState(false);
   useEffect(() => {
-    if (view === 'formatted') setNormalizes(checkFormattedSupport(store.state.tracked.md).normalizes);
     setBridgeError(null);
-    // Checked when entering Formatted view; edits there produce normalized Markdown anyway.
-  }, [view, store, state.doc]);
+  }, [view, state.doc]);
 
   const expanded = state.expanded ? state.tracked.reviews[state.expanded] : null;
   const activeVersion = expanded?.activeVersion ? state.versions[expanded.activeVersion] : null;
@@ -214,7 +211,14 @@ function Workspace({
       return { ...base, changes: [] };
     const changes = activeVersion.diff.groups
       .filter((g) => !expanded.popped.includes(g.id))
-      .map((g) => ({ id: g.id, kind: g.kind, from: expanded.from + g.srcFrom, to: expanded.from + g.srcTo }));
+      .map((g) => ({
+        id: g.id,
+        kind: g.kind,
+        from: expanded.from + g.srcFrom,
+        to: expanded.from + g.srcTo,
+        // Whitespace-only originals get a visible symbol (presentation only; the text itself is untouched).
+        ws: g.original && !g.original.trim() ? (g.original.includes('\n') ? ('break' as const) : ('space' as const)) : undefined,
+      }));
     return { ...base, changes };
   }, [expanded, activeVersion, generating, state.tracked]);
 
@@ -388,8 +392,10 @@ function Workspace({
     if (linked) {
       const sel = `[data-review="${CSS.escape(linked.review)}"][data-change="${CSS.escape(linked.change)}"]`;
       const colour = linked.kind === 'added' ? 'var(--green)' : linked.kind === 'deleted' ? 'var(--red)' : 'var(--yellow)';
-      // The element's own rounded outline, strengthened (the insertion + draws its circle in ::after).
-      rules.push(`${sel}:not(.src-insert), ${sel}.src-insert::after { --ring: ${colour}; ${RING_STYLE} }`);
+      // The element's own rounded outline, strengthened (the + and − circles and the ↵ badge are drawn in ::after).
+      rules.push(
+        `${sel}:not(.src-insert):not(.cand-delete):not(.src-break), ${sel}.src-insert::after, ${sel}.cand-delete::after, ${sel}.src-break::after { --ring: ${colour}; ${RING_STYLE} }`,
+      );
     }
     return rules.join('\n');
   }, [peek, linked, state.tracked]);
@@ -465,9 +471,6 @@ function Workspace({
           </button>
           .
         </div>
-      )}
-      {!readOnly && view === 'formatted' && normalizes && (
-        <div className="banner subtle">Editing in Formatted view writes standard Markdown syntax for this document (for example `**bold**`).</div>
       )}
       {bridgeError && view === 'formatted' && (
         <div className="banner error">
@@ -561,7 +564,7 @@ function Workspace({
               </button>
             )}
             <button type="button" className="tiny" aria-label="Dismiss" onClick={() => store.dismissNotice()}>
-              ×
+              <CloseIcon />
             </button>
           </span>
         ) : (

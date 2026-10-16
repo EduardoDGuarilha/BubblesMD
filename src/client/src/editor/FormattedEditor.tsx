@@ -8,7 +8,7 @@ import { diffText } from '../core/textChanges';
 import type { ChangeKind } from '../core/changes';
 import { formattedExtensions, parseMarkdown, serializeDoc } from './markdownModel';
 import { textRects, type DecorationSpec, type EditorCallbacks, type EditorHandle } from './types';
-import { PLUS_SVG } from '../ui/PlusIcon';
+import { PLUS_SVG } from '../ui/icons';
 
 const EXTERNAL = 'bubblesExternal';
 const decoKey = new PluginKey<DecorationSet>('bubblesDecorations');
@@ -189,10 +189,15 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
           const label = KIND_LABEL[c.kind];
           const from = bridge.mdToPm(c.from, 'start');
           const to = bridge.mdToPm(c.to, 'end');
-          if (c.kind !== 'added' && from < to) {
+          if (c.ws === 'break') {
+            // A changed line break keeps its structure; a zero-width badge marks it at the end of the line.
+            decorations.push(
+              Decoration.widget(from, () => sourceMarker(review, c.id, c.kind, true), { side: -1, key: `${review}-${c.id}-break`, ignoreSelection: true }),
+            );
+          } else if (c.kind !== 'added' && from < to) {
             decorations.push(
               Decoration.inline(from, to, {
-                class: `src-change ${c.kind}`,
+                class: `src-change ${c.kind}${c.ws ? ' ws' : ''}`,
                 'data-review': review,
                 'data-change': c.id,
                 'data-kind': c.kind,
@@ -287,15 +292,19 @@ export const FormattedEditor = forwardRef<FormattedHandle, Props>(function Forma
   return <div ref={hostRef} className="editor-host formatted" />;
 });
 
-function sourceMarker(reviewId: string, id: string, kind: ChangeKind): HTMLElement {
+export function sourceMarker(reviewId: string, id: string, kind: ChangeKind, lineBreak = false): HTMLElement {
   const el = document.createElement('span');
-  el.className = kind === 'added' ? 'src-insert' : `src-point ${kind}`;
+  el.className = lineBreak ? `src-break ${kind}` : kind === 'added' ? 'src-insert' : `src-point ${kind}`;
   el.dataset.review = reviewId;
   el.dataset.change = id;
   el.dataset.kind = kind;
-  if (kind === 'added') el.innerHTML = PLUS_SVG;
-  else el.textContent = '◆';
-  el.title = kind === 'added' ? 'Added — click to remove this addition' : `${KIND_LABEL[kind]} formatting — click to keep the original`;
+  if (kind === 'added' && !lineBreak) el.innerHTML = PLUS_SVG;
+  else if (!lineBreak) el.textContent = '◆';
+  el.title = lineBreak
+    ? `${KIND_LABEL[kind]} line break — click to keep the original`
+    : kind === 'added'
+      ? 'Added — click to remove this addition'
+      : `${KIND_LABEL[kind]} formatting — click to keep the original`;
   el.setAttribute('role', 'button');
   el.setAttribute('aria-label', el.title);
   el.contentEditable = 'false';

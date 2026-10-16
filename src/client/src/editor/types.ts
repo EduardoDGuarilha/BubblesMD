@@ -5,7 +5,8 @@ export interface DecorationSpec {
   /** The expanded review the target and change markings belong to; they carry its id as `data-review`. */
   reviewId: string | null;
   target: { from: number; to: number } | null;
-  changes: { id: string; kind: ChangeKind; from: number; to: number }[];
+  /** `ws`: the original is whitespace only, shown with a ␣ / ↵ symbol (presentation only). */
+  changes: { id: string; kind: ChangeKind; from: number; to: number; ws?: 'space' | 'break' }[];
   /** Every open review's passage, marked invisibly (`rt-<id>`) so it can be highlighted without touching editor DOM. */
   anchors: { id: string; from: number; to: number }[];
 }

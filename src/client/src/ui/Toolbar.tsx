@@ -4,6 +4,7 @@ import type { StoreState, WorkspaceStore } from '../state/store';
 import type { AppConfig } from '../services/api';
 import type { FormatCommand } from '../editor/FormattedEditor';
 import { formatCost } from './format';
+import { CloseIcon } from './icons';
 
 interface Props {
   store: WorkspaceStore;
@@ -124,7 +125,7 @@ function SpendPanel({ state, config, onClose }: { state: StoreState; config: App
   return (
     <div className="spend-panel" role="dialog" aria-label="Spending details">
       <button type="button" className="tiny close" aria-label="Close" onClick={onClose}>
-        ×
+        <CloseIcon />
       </button>
       <h3>Models</h3>
       {config ? (

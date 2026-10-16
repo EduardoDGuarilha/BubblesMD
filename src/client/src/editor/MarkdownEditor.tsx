@@ -7,9 +7,9 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import type { ChangeKind } from '../core/changes';
 import { diffText, type Hunk } from '../core/textChanges';
-import { KIND_LABEL } from './FormattedEditor';
+import { KIND_LABEL, sourceMarker } from './FormattedEditor';
 import { textRects, type DecorationSpec, type EditorCallbacks, type EditorHandle } from './types';
-import { PLUS_SVG } from '../ui/PlusIcon';
+import { PLUS_SVG } from '../ui/icons';
 
 const External = Annotation.define<boolean>();
 
@@ -42,13 +42,15 @@ class MarkerWidget extends WidgetType {
     readonly reviewId: string,
     readonly id: string,
     readonly kind: ChangeKind,
+    readonly lineBreak = false,
   ) {
     super();
   }
   eq(other: MarkerWidget) {
-    return other.reviewId === this.reviewId && other.id === this.id && other.kind === this.kind;
+    return other.reviewId === this.reviewId && other.id === this.id && other.kind === this.kind && other.lineBreak === this.lineBreak;
   }
   toDOM() {
+    if (this.lineBreak) return sourceMarker(this.reviewId, this.id, this.kind, true);
     const el = document.createElement('span');
     el.className = this.kind === 'added' ? 'src-insert' : `src-point ${this.kind}`;
     el.dataset.review = this.reviewId;
@@ -216,10 +218,13 @@ function buildDecorations(spec: DecorationSpec, length: number): DecorationSet {
     ranges.push(Decoration.mark({ class: 'src-target' }).range(clamp(spec.target.from), clamp(spec.target.to)));
   }
   for (const c of spec.changes) {
-    if (c.kind !== 'added' && c.from < c.to) {
+    if (c.ws === 'break') {
+      // A changed line break keeps its structure; a zero-width badge marks it at the end of the line.
+      ranges.push(Decoration.widget({ widget: new MarkerWidget(review, c.id, c.kind, true), side: -1 }).range(clamp(c.from)));
+    } else if (c.kind !== 'added' && c.from < c.to) {
       ranges.push(
         Decoration.mark({
-          class: `src-change ${c.kind}`,
+          class: `src-change ${c.kind}${c.ws ? ' ws' : ''}`,
           attributes: { 'data-review': review, 'data-change': c.id, 'data-kind': c.kind, title: `${KIND_LABEL[c.kind]} — click to keep the original wording` },
         }).range(clamp(c.from), clamp(c.to)),
       );

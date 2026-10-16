@@ -6,7 +6,7 @@ import { renderCandidate } from './candidateHtml';
 import { chainDots, layoutChain } from '../core/geometry';
 import { formatCost } from './format';
 import { rupture, ruptureAll } from './fx';
-import { PlusIcon } from './PlusIcon';
+import { CloseIcon, MinusIcon, PlusIcon } from './icons';
 
 interface Props {
   store: WorkspaceStore;
@@ -261,10 +261,10 @@ function MainBubble({
     <section ref={ref} className={`bubble review${generating ? ' generating' : ''}`} aria-label="Suggested revision" aria-busy={generating}>
       <div className="bubble-controls">
         <button type="button" className="tiny" aria-label="Minimize review" title="Minimize (Esc)" onClick={() => store.expand(null)}>
-          −
+          <MinusIcon />
         </button>
         <button type="button" className="tiny" aria-label="Pop this review" title="Pop review (discard)" onClick={onPopFamily}>
-          ×
+          <CloseIcon />
         </button>
       </div>
       <div className="review-heading">{heading}</div>
@@ -504,7 +504,7 @@ function ThoughtBubble({
         disabled={locked}
         onClick={() => onPop(ref.current)}
       >
-        ×
+        <CloseIcon />
       </button>
     </section>
   );
@@ -565,7 +565,7 @@ function NewThought({
         onMouseDown={(e) => e.preventDefault()}
         onClick={first ? onDiscardReview : onCancel}
       >
-        ×
+        <CloseIcon />
       </button>
     </section>
   );

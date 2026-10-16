@@ -115,3 +115,29 @@ plus the motion envelope; a window-resize re-layout was added for robustness.
 - the selection action by mouse, drag, keyboard and Tab+Enter, at the edges, and after scroll and resize;
 - title Cancel / Leave with a request in flight (cancelled, kept in spend), with reload staying on the start page;
 - regressions: Enter submission, pop, Accept/Undo/Redo, Markdown, sound decode.
+
+## 2026-10-16: change-marking pass (boundaries, markers, red −, borders, close icons, tip strip)
+
+**Source of the findings:** a forked investigation reproduced the two screenshots from their transcribed text with
+the app's own diff and renderer. The original saved candidates were not available, so the conclusions rest on the
+transcription (the boundary words match the screenshots).
+
+**Causes:**
+- Merging change runs across one kept space put that space on both sides, which made a punctuation-led insertion an
+  "alteration" of one space.
+- Private-use marker characters next to `**` changed its flanking, so a bold link rendered as literal `**`.
+
+**Changes:**
+- Shared edge whitespace is normalized out of groups. Saved versions are normalized on load with the same ids, texts
+  and pops.
+- Flanking-preserving marker placement, with every render verified against the marker-free parse. Any change that
+  still cannot be marked is listed by its text and stays poppable.
+- Red − deletion markers and ␣/↵ whitespace symbols (presentation only).
+- 4 px rounded source outlines and SVG close/minimize icons.
+- The Formatted-view tip strip is removed.
+
+**Checks:**
+- Vitest 44/44 and xUnit 14/14.
+- A review saved before the fix reloaded with corrected kinds, its pop kept, identical text and no request.
+- Real-editor measurements and a regression pass, as listed in the README. Exact candidate texts were injected through
+  a dev-console stub of the suggest function; no paid calls.

@@ -1,5 +1,6 @@
 import { Marked } from 'marked';
 import type { CandidateDiff, ChangeGroup } from '../core/changes';
+import { MINUS_SVG } from './icons';
 
 const START = '';
 const END = '';
@@ -63,6 +64,174 @@ function markerEl(doc: Document, reviewId: string, g: ChangeGroup, symbol: strin
   return el;
 }
 
+/** The red − at a deletion point: the candidate's counterpart of the source's green insertion +. */
+function deleteEl(doc: Document, reviewId: string, g: ChangeGroup): HTMLElement {
+  const el = doc.createElement('span');
+  el.className = 'cand-delete deleted';
+  el.dataset.review = reviewId;
+  el.dataset.change = g.id;
+  el.dataset.kind = g.kind;
+  el.innerHTML = MINUS_SVG;
+  return el;
+}
+
+const clip = (s: string) => {
+  const t = s.replace(/\s+/g, ' ').trim();
+  return t.length > 28 ? `${t.slice(0, 27)}…` : t;
+};
+
+/** A change that cannot be marked inline, listed by its own text (still hoverable, source-linked and poppable). */
+function chipEl(doc: Document, reviewId: string, g: ChangeGroup): HTMLElement {
+  const el = doc.createElement('span');
+  el.className = `cand-chip ${g.kind}`;
+  el.dataset.review = reviewId;
+  el.dataset.change = g.id;
+  el.dataset.kind = g.kind;
+  el.textContent =
+    g.kind === 'added' ? `+ “${clip(g.replacement)}”` : g.kind === 'deleted' ? `− “${clip(g.original)}”` : `“${clip(g.original)}” → “${clip(g.replacement)}”`;
+  return el;
+}
+
+// ---- keeping markers out of the Markdown syntax ----------------------------------------------------------------
+
+const isMarker = (ch: string | undefined) => !!ch && /[\ue000-\ue002\ue100-\uefff]/.test(ch);
+type CharClass = 'space' | 'punct' | 'other';
+/** marked's classes for emphasis flanking: whitespace (or the text edge), Unicode punctuation/symbols, other. */
+const classOf = (ch: string | undefined): CharClass => (!ch || /\s/.test(ch) ? 'space' : /[\p{P}\p{S}]/u.test(ch) ? 'punct' : 'other');
+/** CommonMark left/right flanking of a delimiter run between two neighbours. Markers count as 'other'. */
+const flanking = (prev: CharClass, next: CharClass) =>
+  `${next !== 'space' && (next !== 'punct' || prev !== 'other')}/${prev !== 'space' && (prev !== 'punct' || next !== 'other')}`;
+const before = (s: string, i: number) => (/[\udc00-\udfff]/.test(s[i - 1] ?? '') ? s.slice(i - 2, i) : s[i - 1]);
+const after = (s: string, i: number) => (i < s.length ? String.fromCodePoint(s.codePointAt(i)!) : undefined);
+/** The nearest character that is not a marker, before index i / from index i. */
+function realBefore(s: string, i: number) {
+  while (i > 0 && isMarker(s[i - 1])) i--;
+  return before(s, i);
+}
+function realAfter(s: string, i: number) {
+  while (i < s.length && isMarker(s[i])) i++;
+  return after(s, i);
+}
+const DELIM = /[*_~]/;
+const BLOCK_PREFIX = /^(?:#{1,6} |[-*+] |\d{1,9}[.)] |> )+/;
+
+/**
+ * Marker characters are invisible after rendering but take part in Markdown parsing, where they count as letters.
+ * Next to a `*`/`_`/`~` run that can change whether the run opens or closes emphasis (e.g. `that `+marker+`**[link](…)**`
+ * stays literal). A marker cluster touching a run moves to the run's other side only when that restores the run's
+ * flanking as it is without markers; a cluster at the start of a line moves past the block marker (`# `, `- `, `1. `,
+ * `> `). Both cross only syntax, so the highlighted text is unchanged.
+ */
+export function keepSyntaxIntact(text: string): string {
+  let s = text;
+  for (let i = 0; i < s.length; i++) {
+    if (!isMarker(s[i])) continue;
+    let j = i;
+    while (j < s.length && isMarker(s[j])) j++;
+    const cluster = s.slice(i, j);
+    if (i === 0 || s[i - 1] === '\n') {
+      const prefix = BLOCK_PREFIX.exec(s.slice(j))?.[0];
+      if (prefix) {
+        s = s.slice(0, i) + prefix + cluster + s.slice(j + prefix.length);
+        i += prefix.length + cluster.length - 1;
+        continue;
+      }
+    }
+    if (DELIM.test(s[j] ?? '')) {
+      let k = j;
+      while (s[k] === s[j]) k++;
+      const truth = flanking(classOf(realBefore(s, i)), classOf(realAfter(s, k)));
+      if (flanking('other', classOf(after(s, k))) !== truth && flanking(classOf(before(s, i)), 'other') === truth) {
+        s = s.slice(0, i) + s.slice(j, k) + cluster + s.slice(k);
+        i = k - 1;
+        continue;
+      }
+    }
+    if (DELIM.test(s[i - 1] ?? '')) {
+      let h = i - 1;
+      while (h > 0 && s[h - 1] === s[i - 1]) h--;
+      const truth = flanking(classOf(realBefore(s, h)), classOf(realAfter(s, j)));
+      if (flanking(classOf(before(s, h)), 'other') !== truth && flanking('other', classOf(after(s, j))) === truth) {
+        s = s.slice(0, h) + cluster + s.slice(h, i) + s.slice(j);
+      }
+    }
+    i = j - 1;
+  }
+  return s;
+}
+
+/** Group indices (into `live`) of every marker cluster that touches Markdown syntax or a line edge. */
+function groupsNearSyntax(s: string): Set<number> {
+  const near = new Set<number>();
+  let open = -1;
+  for (let i = 0; i < s.length; i++) {
+    if (!isMarker(s[i])) continue;
+    let j = i;
+    const ids: number[] = [];
+    while (j < s.length && isMarker(s[j])) {
+      const ch = s[j];
+      if ((ch === START || ch === POINT) && s.charCodeAt(j + 1) >= INDEX_BASE) {
+        const idx = s.charCodeAt(j + 1) - INDEX_BASE;
+        ids.push(idx);
+        if (ch === START) open = idx;
+        j += 2;
+        continue;
+      }
+      if (ch === END) {
+        if (open >= 0) ids.push(open);
+        open = -1;
+      }
+      j++;
+    }
+    if (/[*_~`[\]()<>!\\#|\n]/.test((s[i - 1] ?? '\n') + (s[j] ?? '\n'))) ids.forEach((id) => near.add(id));
+    i = j - 1;
+  }
+  return near;
+}
+
+/** Remove the markers of the given groups (their text stays, unmarked). */
+function withoutMarkers(s: string, drop: (idx: number) => boolean): string {
+  let out = '';
+  let open = -1;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if ((ch === START || ch === POINT) && s.charCodeAt(i + 1) >= INDEX_BASE) {
+      const idx = s.charCodeAt(i + 1) - INDEX_BASE;
+      if (ch === START) open = idx;
+      if (!drop(idx)) out += ch + s[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === END) {
+      if (!drop(open)) out += ch;
+      open = -1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * Parse the marked-up text, verifying the result against the same text without markers. If markers still change
+ * the parse (an exceptional case, e.g. a change ending in punctuation right against `**[`), the groups whose markers
+ * touch syntax are not marked inline (and, as a last resort, none are); they are listed by their text instead, so
+ * every change stays identifiable and poppable and the Markdown always renders as it would without markers.
+ */
+function parseMarked(text: string): string {
+  // A paragraph holding only a marker (e.g. a whole deleted selection or paragraph) is the marker's own place.
+  const bare = (html: string) => html.replace(SENTINELS, '').replace(/<p><\/p>\n?/g, '');
+  const plain = marked.parse(text.replace(SENTINELS, '')) as string;
+  let withMarks = keepSyntaxIntact(text);
+  let html = marked.parse(withMarks) as string;
+  if (bare(html) === plain) return html;
+  const near = groupsNearSyntax(withMarks);
+  withMarks = withoutMarkers(withMarks, (idx) => near.has(idx));
+  html = marked.parse(withMarks) as string;
+  if (bare(html) === plain) return html;
+  return plain;
+}
+
 /**
  * Render the candidate (after pops) with every live change group wrapped in a pop target. Groups are marked
  * with private-use sentinels before Markdown rendering, so a change may cross formatting boundaries; groups
@@ -99,7 +268,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
     pre.textContent = text;
     root.append(pre);
   } else {
-    root.innerHTML = marked.parse(text) as string;
+    root.innerHTML = parseMarked(text);
     sanitize(root);
   }
 
@@ -130,7 +299,7 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
         if (g) {
           seen.add(g.id);
           if (expectIndex === 'point')
-            frag.append(g.kind === 'deleted' ? markerEl(doc, reviewId, g, '', 'gap') : markerEl(doc, reviewId, g, g.replacement.includes('\n') ? '↵' : '␣', 'ws'));
+            frag.append(g.kind === 'deleted' ? deleteEl(doc, reviewId, g) : markerEl(doc, reviewId, g, g.replacement.includes('\n') ? '↵' : '␣', 'ws'));
           else current = g;
         }
         expectIndex = null;
@@ -154,13 +323,14 @@ export function renderCandidate(diff: CandidateDiff, popped: readonly string[], 
   }
   root.querySelectorAll('a[href]').forEach((a) => a.setAttribute('href', (a.getAttribute('href') ?? '').replace(SENTINELS, '')));
 
-  // Changes hidden inside attributes (e.g. a link destination) still need a visible, poppable marker.
+  // Changes that are not marked inline (inside a link destination, or not markable without changing the Markdown)
+  // are listed by their own text: hover pairs them with the source, and each one pops individually.
   const unseen = live.filter((g) => !seen.has(g.id));
   if (unseen.length) {
     const p = doc.createElement('p');
     p.className = 'cand-unseen';
-    p.append('Changed link or formatting: ');
-    for (const g of unseen) p.append(markerEl(doc, reviewId, g, '◆', 'format'));
+    p.append('Not marked inline: ');
+    for (const g of unseen) p.append(chipEl(doc, reviewId, g), ' ');
     root.append(p);
   }
   for (const el of root.querySelectorAll<HTMLElement>('[data-change]')) {

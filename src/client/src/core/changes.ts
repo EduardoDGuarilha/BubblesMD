@@ -27,10 +27,63 @@ export function tokenize(text: string): string[] {
 
 type Part = { kind: 'same' | 'removed' | 'added'; text: string };
 
+const classify = (original: string, replacement: string): ChangeKind => (original && replacement ? 'altered' : replacement ? 'added' : 'deleted');
+
+/** Lengths of the whitespace prefix and suffix that both strings share exactly. */
+function sharedWhitespace(a: string, b: string): [number, number] {
+  let lead = 0;
+  while (lead < a.length && lead < b.length && a[lead] === b[lead] && /\s/.test(a[lead])) lead++;
+  let trail = 0;
+  while (
+    trail < a.length - lead &&
+    trail < b.length - lead &&
+    a[a.length - 1 - trail] === b[b.length - 1 - trail] &&
+    /\s/.test(a[a.length - 1 - trail])
+  )
+    trail++;
+  return [lead, trail];
+}
+
+/**
+ * Change-group boundaries: whitespace that the original and the replacement share at a group's start or end
+ * belongs to the unchanged text around it, and each group is classified from what remains (so ", the kind of day"
+ * inserted before a kept space is Added, not an alteration of that space). Only the segmentation changes: the text
+ * on each side, the group ids and their order stay the same, so accepted text and every pop are exactly as before.
+ * Whitespace that differs is a real edit and stays in its group. Idempotent; also applied to saved versions.
+ */
+export function normalizeDiff(diff: CandidateDiff): CandidateDiff {
+  const byId = new Map(diff.groups.map((g) => [g.id, g]));
+  const pieces: Piece[] = [];
+  const groups: ChangeGroup[] = [];
+  const same = (text: string) => {
+    if (!text) return;
+    const last = pieces[pieces.length - 1];
+    if (last?.kind === 'same') pieces[pieces.length - 1] = { kind: 'same', text: last.text + text };
+    else pieces.push({ kind: 'same', text });
+  };
+  for (const piece of diff.pieces) {
+    if (piece.kind === 'same') {
+      same(piece.text);
+      continue;
+    }
+    const g = byId.get(piece.id)!;
+    const [lead, trail] = g.original === g.replacement ? [0, 0] : sharedWhitespace(g.original, g.replacement);
+    const original = g.original.slice(lead, g.original.length - trail);
+    const replacement = g.replacement.slice(lead, g.replacement.length - trail);
+    same(g.original.slice(0, lead));
+    const srcFrom = g.srcFrom + lead;
+    groups.push({ ...g, kind: classify(original, replacement), srcFrom, srcTo: srcFrom + original.length, original, replacement });
+    pieces.push({ kind: 'change', id: g.id });
+    same(g.original.slice(g.original.length - trail));
+  }
+  return { pieces, groups };
+}
+
 /**
  * Deterministic token-level diff of captured source vs. candidate. Adjacent removed/added portions form one
  * 'altered' group; groups separated only by a single whitespace token are merged so a rewritten phrase reads
- * as one change. Group ids (c1, c2, …) follow document order and are stable for the candidate version.
+ * as one change, then boundaries are normalized (normalizeDiff). Group ids (c1, c2, …) follow document order and
+ * are stable for the candidate version.
  */
 export function diffCandidate(source: string, candidate: string): CandidateDiff {
   const parts: Part[] = [];
@@ -80,7 +133,7 @@ export function diffCandidate(source: string, candidate: string): CandidateDiff 
       continue;
     }
     const id = `c${groups.length + 1}`;
-    const kind: ChangeKind = run.original && run.replacement ? 'altered' : run.replacement ? 'added' : 'deleted';
+    const kind = classify(run.original, run.replacement);
     groups.push({
       id,
       kind,
@@ -92,7 +145,7 @@ export function diffCandidate(source: string, candidate: string): CandidateDiff 
     pieces.push({ kind: 'change', id });
     srcPos += run.original.length;
   }
-  return { pieces, groups };
+  return normalizeDiff({ pieces, groups });
 }
 
 /** Candidate text after the writer's pops: a popped group keeps the original wording. */

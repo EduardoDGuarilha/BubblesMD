@@ -1,5 +1,5 @@
 import { History } from '../core/history';
-import { diffCandidate, effectiveText, isUnchanged, keepOriginalChecks, stripAccidentalBoundaryBreaks } from '../core/changes';
+import { diffCandidate, effectiveText, isUnchanged, keepOriginalChecks, normalizeDiff, stripAccidentalBoundaryBreaks } from '../core/changes';
 import type { Hunk } from '../core/textChanges';
 import {
   acceptReview,
@@ -800,7 +800,8 @@ export class WorkspaceStore {
         doc: saved.doc,
         tracked: saved.tracked,
         revision: saved.revision,
-        versions: saved.versions,
+        // Saved versions get the current change-group boundaries: ids, order, texts and pops are unchanged.
+        versions: Object.fromEntries(Object.entries(saved.versions).map(([id, v]) => [id, { ...v, diff: normalizeDiff(v.diff) }])),
         requests,
         ledger,
         decisions: saved.decisions ?? [],

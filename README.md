@@ -56,7 +56,8 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
   Ctrl/Cmd+Alt+M, and write a reflection. The action keeps still under the pointer; in Formatted view Tab reaches it
   (in Markdown view Tab indents, so use the shortcut). Enter submits it; Shift+Enter adds a line. Selecting, creating and typing never call the model.
 - **Review:** the suggestion bubble contains exactly the replacement for your selection.
-  - Yellow marks altered wording, red marks deleted wording, and a green **+** marks added text.
+  - Yellow marks altered wording, red marks deleted wording, and a green **+** marks added text. In the suggestion,
+    a red **−** marks each deletion point. Changed spacing shows ␣ and a changed line break ↵ (symbols only).
   - Hover or focus any change to highlight the matching spans on both sides (their own outlines grow stronger).
   - Click a change on either side, or press Enter on it, to **pop** it: an alteration or deletion falls back to the
     original wording, and an addition is removed. Popping never changes the document and never calls the model.
@@ -146,13 +147,13 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 - Undo history does not survive a reload (by design); the document and pending reviews do.
 - Formatted view supports paragraphs, headings, emphasis/strong/strike, links, lists, blockquotes, inline/fenced code,
   hard breaks and rules.
-  - Editing there writes standard Markdown syntax (e.g. `__a__` becomes `**a**`); a notice says so when it applies.
+  - Editing there writes standard Markdown syntax (e.g. `__a__` becomes `**a**`).
   - Line endings are normalized to `\n` on import.
 
 ## Verification performed
 
 Automated:
-- **Vitest (35):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document)
+- **Vitest (44):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document; 9 in the change-marking pass: boundaries, saved-version compatibility, Markdown around markers, deletion markers)
   - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
     lists, Markdown-looking code, cross-block selections, loud failure.
   - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
@@ -282,6 +283,65 @@ Verified in the real editor (fixture provider):
   good and people liked it a lot", keeping the casual tone.
 - **Tests:** Vitest 35/35, xUnit 14/14.
 
+**Change-marking pass of 2026-10-16** (boundaries, Markdown around markers, red −, borders, close icons, tip strip).
+
+The reported screenshots were investigated by running their *transcribed* text through the app's diff and renderer.
+The original saved candidates were not available.
+
+Causes found:
+- **Grouping.** Change runs separated by one kept space were merged with that space on both sides. So
+  `term when` → `term, the kind of day when` became an alteration of a single space (a tiny yellow mark), and groups
+  carried shared edge spaces.
+- **Rendering.** The invisible marker characters count as letters for Markdown emphasis rules, so
+  `that ` + marker + `**[Albus Dumbledore](…)**` no longer opened bold and showed literal `**`.
+- **Not a defect.** The second screenshot kept the word "when", so word-level fidelity correctly shows it between
+  two separate changes.
+
+Changes:
+- **Boundaries.** Whitespace both sides share at a group's edge moves to the surrounding text, and each group is
+  classified from what remains.
+  - Ids, order, text and pops are unchanged.
+  - Saved versions are normalized the same way when loaded.
+- **Markers.**
+  - A marker cluster touching a `*`/`_`/`~` run moves across it only when that restores the run's flanking. A marker
+    at a line start moves past the block marker.
+  - Every render is verified against the marker-free parse. A change that still cannot be marked inline is listed by
+    its own text under the suggestion, still hoverable, source-linked and poppable.
+- **Red −** at deletion points; ␣/↵ symbols for whitespace-only changes.
+- **Rounded-rectangle source outlines** and geometric close icons.
+- **The Formatted-view tip strip is removed.**
+
+Verified:
+- **A review saved before the fix (the transcribed screenshot-2 text, with one pop), reloaded after it:**
+  - the one-space alteration became an Added group;
+  - the pop was kept and the text was identical;
+  - no request was made;
+  - the bold link rendered.
+- **Real editor:**
+  - the comma insertion shows a green + and ", the kind of day";
+  - three red − markers, each within 0.69 px of the text centre;
+  - hover and focus on a − rang exactly the matching source deletion; click and Enter popped it with no document
+    change and no request;
+  - a whole-selection deletion shows one − and its note;
+  - the ␣ and ↵ symbols left paragraph heights unchanged and kept the line break;
+  - the long alteration wraps with its highlight;
+  - every close/minimize icon sits exactly centred (0 px) in its 26 px (22 px) hit area;
+  - there is no tip strip;
+  - checked in light and dark.
+- **Regressions:**
+  - Enter refine (one call, one step);
+  - Try again / Retry;
+  - `#same` correction (2 entries);
+  - stable clusters and peek;
+  - Accept/Undo/Redo;
+  - reload recovery;
+  - sound decode after a gesture;
+  - title dialog;
+  - spend.
+- **Tests:** Vitest 44/44 (added: boundary normalization, exact Accept with a pop, saved-version compatibility, and the
+  renderer cases for bold, emphasis and strikethrough links, partially changed bold, the listed fallback, and
+  deletion markers), xUnit 14/14.
+
 ## Known limitations
 
 - Very large documents are serialized and diffed on every Formatted keystroke; this is fine for typical documents and
@@ -294,6 +354,11 @@ Verified in the real editor (fixture provider):
   review's insertion + re-wraps a line, markers of later passages can sit up to a line away from them until it closes.
 - If the family is clamped to the viewport and every straight or one-bend route is blocked, no connection is drawn
   (seen once: a top-row marker scrolled near the top edge).
+- A deleted (or inserted) word includes the one space removed (or added) with it, so its outline or highlight covers
+  that space. Only spaces kept on both sides are moved outside a change.
+- In rare cases a change cannot be marked inline without changing how the Markdown renders, for example punctuation
+  added directly against `**[link](…)**`. It is then listed under the suggestion by its text ("Not marked inline")
+  instead of being highlighted in place. It stays paired with the source and poppable.
 - The selection action hides when a selection is taller than the visible area (neither above nor below fits);
   Ctrl/Cmd+Alt+M still works.
 - Thought dots are recomputed on every layout pass but do not follow the ±1.5 px float exactly.
