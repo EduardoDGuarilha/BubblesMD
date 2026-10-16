@@ -1,0 +1,32 @@
+# Original inputs may contain supplied credentials or personal material.
+/private/
+
+# Local secrets; safe examples may be deliberately committed.
+.env
+.env.*
+!.env.example
+**/appsettings.Local.json
+**/appsettings.*.local.json
+**/secrets.json
+*.user
+*.suo
+
+# Generated application/dependency outputs.
+node_modules/
+dist/
+bin/
+obj/
+.vs/
+.idea/
+coverage/
+TestResults/
+playwright-report/
+test-results/
+
+# Root copy of the assessment PDF may contain the supplied credential; the original lives in private/.
+/Engineering Assessment 2026.pdf
+
+# Built client copied into the server's static assets.
+src/server/BubblesMd.Server/wwwroot/
+publish/
+*.tsbuildinfo

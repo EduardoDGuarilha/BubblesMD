@@ -1,0 +1,163 @@
+<style>
+#bubbles-left-review{--paper:light-dark(#fff,#202224);--ink:light-dark(#30363b,#ececeb);--quiet:light-dark(#677078,#b3b9bd);--rule:light-dark(#e4e6e8,#3c4145);--chrome:light-dark(#f4f5f6,#292c2f);--bubble:light-dark(#fffaf4,#302b26);--edge:light-dark(#c87c40,#dda16b);--yellow:light-dark(#a47b13,#d9b64a);--yellow-soft:light-dark(#fcf2d4,#494124);--red:light-dark(#c05952,#e59890);--red-soft:light-dark(#fbeae7,#49302f);--green:light-dark(#458357,#8bc295);--green-soft:light-dark(#e5f1e5,#2d4232);position:relative;background:var(--paper);color:var(--ink);font:15px/1.85 Arial,Helvetica,sans-serif;border:1px solid var(--rule);border-radius:8px;overflow:clip;}
+#bubbles-left-review *{box-sizing:border-box;}
+#bubbles-left-review [hidden]{display:none!important;}
+#bubbles-left-review button{font:inherit;color:inherit;cursor:inherit;}
+#bubbles-left-review .top{padding:13px 110px 13px 22px;display:flex;gap:20px;align-items:center;flex-wrap:wrap;background:var(--chrome);border-bottom:1px solid var(--rule);}
+#bubbles-left-review .brand{font-weight:600;font-size:16px;letter-spacing:-.5px;}
+#bubbles-left-review .filename{font-size:12px;color:var(--quiet);}
+#bubbles-left-review .toolbar{padding:7px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--rule);color:var(--quiet);font-size:14px;}
+#bubbles-left-review .toolbar button{border:0;background:transparent;padding:3px;font-size:14px;}
+#bubbles-left-review .toolbar .view{margin-left:auto;font-size:12px;}
+#bubbles-left-review .workspace{position:relative;display:grid;grid-template-columns:48px minmax(0,var(--writing-width,420px)) minmax(0,1fr);gap:24px;padding:32px 22px 40px;}
+#bubbles-left-review .document{grid-column:2;min-width:0;}
+#bubbles-left-review h1{font-size:28px;line-height:1.3;letter-spacing:-.7px;font-weight:600;margin:0 0 17px;}
+#bubbles-left-review h2{font-size:20px;line-height:1.4;font-weight:600;margin:31px 0 15px;}
+#bubbles-left-review p{margin:0 0 19px;}
+#bubbles-left-review .passage{position:relative;}
+#bubbles-left-review .marker{position:absolute;left:-65px;top:3px;display:grid;place-items:center;width:48px;min-height:31px;border:1.3px solid var(--edge);border-radius:50%;background:var(--bubble);color:var(--quiet);font-size:17px;line-height:1;letter-spacing:2px;}
+#bubbles-left-review .marker:after{content:'';position:absolute;right:-9px;top:7px;width:5px;height:5px;border:1.3px solid var(--edge);border-radius:50%;background:var(--paper);}
+#bubbles-left-review .marker:before{content:'';position:absolute;right:-15px;top:3px;width:3px;height:3px;border:1.3px solid var(--edge);border-radius:50%;background:var(--paper);}
+#bubbles-left-review .active-anchor{border-left:2px solid var(--rule);padding-left:12px;margin-left:-14px;}
+#bubbles-left-review .source-change{display:inline;border:1px solid transparent;border-radius:12px;padding:0;background:transparent;color:inherit;line-height:inherit;text-align:left;font:inherit;box-decoration-break:clone;-webkit-box-decoration-break:clone;}
+#bubbles-left-review .source-change:not(:disabled){padding:1px 5px;border-color:var(--yellow);background:var(--yellow-soft);}
+#bubbles-left-review .source-change.red:not(:disabled){border-color:var(--red);background:var(--red-soft);}
+#bubbles-left-review .insert{display:inline-grid;place-items:center;border:1px solid var(--green);border-radius:50%;width:22px;height:22px;background:var(--green-soft);font-size:16px;line-height:1;vertical-align:baseline;margin-left:4px;}
+#bubbles-left-review .source-change.linked{box-shadow:0 0 0 2px var(--yellow);}
+#bubbles-left-review .source-change.red.linked{box-shadow:0 0 0 2px var(--red);}
+#bubbles-left-review .insert.linked{box-shadow:0 0 0 2px var(--green);}
+#bubbles-left-review .rail{grid-column:3;min-width:0;position:relative;}
+#bubbles-left-review .review-group{min-width:0;}
+#bubbles-left-review .review{position:relative;background:var(--bubble);border:1.5px solid var(--edge);border-radius:38px 43px 41px 34px;padding:30px 22px 22px;min-width:0;}
+#bubbles-left-review .review:before,#bubbles-left-review .review:after{content:'';position:absolute;left:-17px;top:47px;width:9px;height:9px;border:1.3px solid var(--edge);border-radius:50%;background:var(--paper);}
+#bubbles-left-review .review:after{width:5px;height:5px;left:-28px;top:39px;}
+#bubbles-left-review .review-heading{font-size:11px;color:var(--quiet);margin:0 0 13px;padding-right:42px;text-transform:uppercase;letter-spacing:.7px;}
+#bubbles-left-review .bubble-controls{position:absolute;right:14px;top:9px;display:flex;gap:3px;}
+#bubbles-left-review .tiny{border:0;background:transparent;min-width:25px;height:26px;display:grid;place-items:center;line-height:1;color:var(--quiet);font-size:16px;}
+#bubbles-left-review .candidate{font-size:14px;line-height:1.8;overflow-wrap:anywhere;}
+#bubbles-left-review .candidate p{margin-bottom:15px;}
+#bubbles-left-review .candidate-change{display:inline;background:var(--yellow-soft);color:inherit;border:0;border-radius:2px;padding:1px 0;font:inherit;line-height:inherit;text-align:left;}
+#bubbles-left-review .candidate-change.green{background:var(--green-soft);}
+#bubbles-left-review .candidate-change.linked{box-shadow:0 2px 0 var(--yellow);}
+#bubbles-left-review .candidate-change.green.linked{box-shadow:0 2px 0 var(--green);}
+#bubbles-left-review .deleted-gap{display:inline-block;width:4px;height:14px;vertical-align:middle;}
+#bubbles-left-review .deleted-gap.linked{border-left:2px solid var(--red);}
+#bubbles-left-review .deleted-gap.restored{display:inline;width:auto;height:auto;}
+#bubbles-left-review .actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:17px;}
+#bubbles-left-review .actions button{border:1px solid var(--rule);border-radius:17px;padding:4px 10px;background:var(--paper);font-size:12px;line-height:1.5;}
+#bubbles-left-review .actions .accept{background:var(--green-soft);border-color:transparent;}
+#bubbles-left-review .thoughts{display:flex;flex-wrap:wrap;gap:0 20px;}
+#bubbles-left-review .thought{position:relative;flex:1 1 175px;min-width:0;margin:28px 0 0;border:1.3px solid var(--edge);border-radius:32px 36px 30px 35px;background:var(--bubble);padding:20px 19px 15px;font-size:12px;line-height:1.65;overflow-wrap:anywhere;}
+#bubbles-left-review .thought:last-child{flex-basis:100%;}
+#bubbles-left-review .thought:before,#bubbles-left-review .thought:after{content:'';position:absolute;top:-17px;left:15px;width:9px;height:9px;border:1.3px solid var(--edge);border-radius:50%;background:var(--paper);}
+#bubbles-left-review .thought:after{top:-28px;left:5px;width:5px;height:5px;}
+#bubbles-left-review .thought .tiny{position:absolute;right:5px;top:1px;font-size:14px;}
+#bubbles-left-review .thought p{margin:0;}
+#bubbles-left-review .add-thought{position:relative;border:1.3px solid var(--edge);background:var(--bubble);border-radius:50%;width:34px;height:34px;display:grid;place-items:center;margin:25px auto 0;line-height:1;font-size:21px;}
+#bubbles-left-review .footer{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-top:1px solid var(--rule);padding:10px 20px;font-size:11px;color:var(--quiet);}
+#bubbles-left-review .footer .right{margin-left:auto;}
+#bubbles-left-review .footer button{background:transparent;border:0;text-decoration:underline;font-size:12px;}
+#bubbles-left-review .hover-line{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible;}
+#bubbles-left-review .hover-line path{fill:none;stroke:var(--edge);stroke-width:1.3;}
+#bubbles-left-review .pair-message{min-height:22px;font-size:11px;color:var(--quiet);margin-bottom:9px;}
+@media(max-width:850px){#bubbles-left-review .workspace{grid-template-columns:46px minmax(0,1fr);gap:15px;padding:25px 17px;}#bubbles-left-review .document{grid-column:2;}#bubbles-left-review .rail{grid-column:2;padding-top:15px!important;grid-row:2;}#bubbles-left-review .marker{left:-59px;}#bubbles-left-review .review-group{max-width:440px;}#bubbles-left-review .thought{max-width:340px;}#bubbles-left-review .review:before{top:-16px;left:17px;}#bubbles-left-review .review:after{top:-25px;left:10px;}#bubbles-left-review .hover-line{display:none;}}
+@media(max-width:400px){#bubbles-left-review .workspace{grid-template-columns:37px minmax(0,1fr);gap:11px;padding:20px 12px;}#bubbles-left-review .marker{left:-46px;width:33px;font-size:14px;}#bubbles-left-review .review{padding:31px 16px 20px;border-radius:31px;}#bubbles-left-review .thought:nth-child(even){margin-left:15px;}#bubbles-left-review .top{gap:4px;}#bubbles-left-review h1{font-size:25px;}}
+@media(pointer:coarse){#bubbles-left-review .tiny,#bubbles-left-review .marker,#bubbles-left-review .insert,#bubbles-left-review .add-thought{min-width:44px;min-height:44px;}#bubbles-left-review .bubble-controls{top:-12px;background:var(--bubble);border-radius:20px;}#bubbles-left-review .thought .tiny{right:-5px;top:-16px;border-radius:50%;background:var(--bubble);}#bubbles-left-review .actions button{min-height:44px;}}
+</style>
+<section id="bubbles-left-review" aria-label="Bubbles.MD left positioned document with a long suggestion, three reflections, and neighboring reviews">
+  <header class="top"><span class="brand">Bubbles.MD</span><span class="filename">Pilot plan.md</span></header>
+  <div class="toolbar" aria-label="Illustrative formatting toolbar"><button type="button" disabled aria-label="Bold"><b>B</b></button><button type="button" disabled aria-label="Italic"><i>I</i></button><button type="button" disabled aria-label="Heading">H</button><button type="button" disabled aria-label="List">☷</button><span class="view">Formatted · Markdown</span></div>
+  <div class="workspace">
+    <article class="document" aria-label="Original pilot plan">
+      <h1>A smaller first release</h1>
+      <div class="passage" data-review-source="opening"><button type="button" class="marker cursor-interaction" data-open="opening" aria-label="Open review of the introduction" data-tooltip="Introduction · 1 thought">•••</button><p>We want people to feel <button type="button" class="source-change cursor-interaction" data-owner="opening" data-pair="opening" data-original="confident" data-tooltip="Altered" disabled>confident</button> when they ask for help with their writing. The first pilot should tell us where the experience helps and where it becomes confusing.</p></div>
+      <h2>Run a focused pilot</h2>
+      <div class="passage" data-review-source="pilot"><button type="button" class="marker cursor-interaction" data-open="pilot" aria-label="Reopen the pilot review" data-tooltip="Pilot plan · 3 thoughts" hidden>•••</button>
+        <p>For the first release, we will invite <button type="button" class="source-change cursor-interaction" data-owner="pilot" data-pair="volunteers" data-original="twenty" data-tooltip="Altered">twenty</button> volunteers to try the editor for one week. Each person will write a short document, request changes to a selected passage, and decide which suggestions to keep. We will collect their feedback after each session.</p>
+        <p>The goal is to <button type="button" class="source-change cursor-interaction" data-owner="pilot" data-pair="goal" data-original="prove that the editor can handle every writing task" data-tooltip="Altered">prove that the editor can handle every writing task</button>. We will track how many suggestions are generated <button type="button" class="source-change red cursor-interaction" data-owner="pilot" data-pair="time" data-original="and how much time people spend in the app" data-tooltip="Deleted">and how much time people spend in the app</button>. We will also ask whether the suggestions helped them express what they meant.<button type="button" class="insert cursor-interaction" data-owner="pilot" data-pair="cost" data-tooltip="Added" aria-label="Added text at this position">+</button></p>
+      </div>
+      <h2>Listen before expanding</h2>
+      <p>After the sessions, we will look for moments when people hesitate, lose track of a suggestion, or accept something they did not intend to change. We will improve those moments before inviting a larger group.</p>
+      <p>A useful suggestion is only part of the experience. People should understand what changed, stay in control of the result, and return to their writing without losing their train of thought.</p>
+      <h2>Decide what comes next</h2>
+      <div class="passage" data-review-source="ending"><button type="button" class="marker cursor-interaction" data-open="ending" aria-label="Open review of next steps" data-tooltip="Next steps · 2 thoughts">•••</button><p>At the end of the pilot, we will <button type="button" class="source-change cursor-interaction" data-owner="ending" data-pair="ending" data-original="add more features" data-tooltip="Altered" disabled>add more features</button> based on what participants tell us. The next release should address the clearest problem we observed.</p></div>
+    </article>
+    <aside class="rail" aria-label="One expanded review and its reflections">
+      <div class="review-group">
+        <div class="pair-message" aria-live="polite">Pilot plan · 4 changes · 3 thoughts</div>
+        <section class="review" aria-label="Suggested revision">
+          <div class="bubble-controls"><button type="button" class="tiny cursor-interaction" data-action="minimize" aria-label="Minimize active review">−</button><button type="button" class="tiny cursor-interaction" data-action="pop" aria-label="Pop active review">×</button></div>
+          <div class="review-heading">Possible revision</div>
+          <div class="candidate" data-candidate="pilot">
+            <p>For the first release, we will invite <button type="button" class="candidate-change cursor-interaction" data-pair="volunteers" data-tooltip="Altered">ten</button> volunteers to try the editor for one week. Each person will write a short document, request changes to a selected passage, and decide which suggestions to keep. We will collect their feedback after each session.</p>
+            <p>The goal is to <button type="button" class="candidate-change cursor-interaction" data-pair="goal" data-tooltip="Altered">learn where the review flow helps and where it gets in the way</button>. We will track how many suggestions are generated<span class="deleted-gap" data-pair="time" aria-label="Deletion position"></span>. We will also ask whether the suggestions helped them express what they meant. <button type="button" class="candidate-change green cursor-interaction" data-pair="cost" data-tooltip="Added">Each request will also record its token cost.</button></p>
+          </div>
+          <div class="candidate" data-candidate="opening" hidden><p>We want people to feel <button type="button" class="candidate-change cursor-interaction" data-pair="opening" data-tooltip="Altered">in control</button> when they ask for help with their writing. The first pilot should tell us where the experience helps and where it becomes confusing.</p></div>
+          <div class="candidate" data-candidate="ending" hidden><p>At the end of the pilot, we will <button type="button" class="candidate-change cursor-interaction" data-pair="ending" data-tooltip="Altered">choose one improvement to make next</button> based on what participants tell us. The next release should address the clearest problem we observed.</p></div>
+          <div class="actions"><button type="button" class="accept" disabled>Accept</button><button type="button" disabled>Suggest</button><button type="button" disabled>Reject</button><button type="button" class="repair" disabled hidden>Repair</button></div>
+        </section>
+        <div class="thoughts" data-thoughts="pilot">
+          <section class="thought" aria-label="First reflection"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop first reflection">×</button><p>Start with ten people. We need time to understand each session.</p></section>
+          <section class="thought" aria-label="Second reflection"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop second reflection">×</button><p>This is a learning exercise. Don’t promise that we can handle every writing task.</p></section>
+          <section class="thought" aria-label="Third reflection"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop third reflection">×</button><p>Track useful outcomes and token cost. Time spent in the app isn’t our goal.</p></section>
+        </div>
+        <div class="thoughts" data-thoughts="opening" hidden><section class="thought"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop introduction reflection">×</button><p>Emphasize the writer’s control over the outcome.</p></section></div>
+        <div class="thoughts" data-thoughts="ending" hidden><section class="thought"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop next steps reflection">×</button><p>Avoid promising a feature list before we have learned anything.</p></section><section class="thought"><button type="button" class="tiny cursor-interaction" data-action="pop-thought" aria-label="Pop second next steps reflection">×</button><p>Keep the next step small and concrete.</p></section></div>
+      </div>
+    </aside>
+  </div>
+  <svg class="hover-line" aria-hidden="true"><path></path></svg>
+  <footer class="footer"><span class="status" aria-live="polite">Left layout study · 3 example reviews</span><button type="button" class="restore cursor-interaction" hidden>Undo pop</button><span class="right">Local example · no AI requests</span></footer>
+</section>
+<script>
+(()=>{
+ const root=document.getElementById('bubbles-left-review');
+ const state={active:'pilot',popped:[],reverted:[],markings:'Active review only'};
+ const ids=['opening','pilot','ending'];
+ const group=root.querySelector('.review-group'),rail=root.querySelector('.rail'),line=root.querySelector('.hover-line path'),status=root.querySelector('.status');
+ const candidates=[...root.querySelectorAll('.candidate-change')];
+ candidates.forEach(el=>el.dataset.proposed=el.textContent);
+ const initial=window.openai?.widgetState?.privateContent;
+ function adopt(next){if(!next)return;if(ids.includes(next.active)||next.active===null)state.active=next.active;if(Array.isArray(next.popped))state.popped=next.popped.filter(v=>ids.includes(v));if(Array.isArray(next.reverted))state.reverted=next.reverted.filter(v=>['opening','ending','volunteers','goal','time','cost'].includes(v));}
+ adopt(initial);
+ function clearLink(){root.querySelectorAll('.linked').forEach(el=>el.classList.remove('linked'));line.setAttribute('d','');}
+ function place(){if(!state.active)return;const passage=root.querySelector('[data-review-source="'+state.active+'"]');const workspace=root.querySelector('.workspace');rail.style.paddingTop=Math.max(0,passage.getBoundingClientRect().top-workspace.getBoundingClientRect().top-32)+'px';}
+ function render(){
+   clearLink();group.hidden=!state.active;rail.hidden=!state.active;
+   root.querySelectorAll('[data-open]').forEach(el=>{el.hidden=state.active===el.dataset.open||state.popped.includes(el.dataset.open);});
+   root.querySelectorAll('[data-review-source]').forEach(el=>el.classList.toggle('active-anchor',el.dataset.reviewSource===state.active));
+   root.querySelectorAll('.source-change').forEach(el=>{el.disabled=el.dataset.owner!==state.active||state.reverted.includes(el.dataset.pair);});
+   root.querySelector('.insert').hidden=state.active!=='pilot'||state.reverted.includes('cost');
+   root.querySelectorAll('[data-candidate]').forEach(el=>el.hidden=el.dataset.candidate!==state.active);
+   root.querySelectorAll('[data-thoughts]').forEach(el=>el.hidden=el.dataset.thoughts!==state.active);
+   candidates.forEach(el=>{const reverted=state.reverted.includes(el.dataset.pair),source=root.querySelector('.source-change[data-pair="'+el.dataset.pair+'"]');el.textContent=reverted&&source?source.dataset.original:el.dataset.proposed;el.hidden=el.dataset.pair==='cost'&&reverted;el.style.background=reverted?'transparent':'';});
+   const deletion=root.querySelector('.deleted-gap');deletion.textContent=state.reverted.includes('time')?' and how much time people spend in the app':'';deletion.classList.toggle('restored',state.reverted.includes('time'));
+   root.querySelector('.repair').hidden=state.reverted.length===0;
+   root.querySelector('.restore').hidden=!state.popped.length&&!state.reverted.length&&!root.querySelector('.thought[hidden]');
+   root.querySelector('.pair-message').textContent=state.active==='pilot'?'Pilot plan · 4 changes · 3 thoughts':state.active==='opening'?'Introduction · 1 change · 1 thought':'Next steps · 1 change · 2 thoughts';
+   place();
+ }
+ function save(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{activeReview:state.active},privateContent:{active:state.active,popped:[...state.popped],reverted:[...state.reverted]}}).catch(()=>{});}
+ function open(id){state.active=id;render();save();}
+ function link(el){
+   clearLink();const pair=el.dataset.pair;if(!state.active||state.reverted.includes(pair))return;
+   const source=root.querySelector('[data-owner="'+state.active+'"][data-pair="'+pair+'"]'),candidate=root.querySelector('[data-candidate="'+state.active+'"] [data-pair="'+pair+'"]');
+   if(!source||!candidate)return;source.classList.add('linked');candidate.classList.add('linked');
+   const s=source.getBoundingClientRect(),t=candidate.getBoundingClientRect(),r=root.getBoundingClientRect(),column=root.querySelector('.document').getBoundingClientRect();const x1=s.right-r.left+3,y1=s.top-r.top+s.height/2,x2=t.left-r.left-3,y2=t.top-r.top+t.height/2,gutter=column.right-r.left+10;
+   line.setAttribute('d','M '+x1+' '+y1+' L '+gutter+' '+y1+' C '+gutter+' '+y1+', '+gutter+' '+y2+', '+x2+' '+y2);
+ }
+ root.querySelectorAll('[data-pair]').forEach(el=>{el.addEventListener('pointerenter',()=>link(el));el.addEventListener('pointerleave',clearLink);el.addEventListener('focus',()=>link(el));el.addEventListener('blur',clearLink);});
+ root.addEventListener('click',event=>{
+   const opener=event.target.closest('[data-open]');if(opener){open(opener.dataset.open);return;}
+   const pair=event.target.closest('button[data-pair]');if(pair){if(pair.classList.contains('insert')){open('pilot');link(pair);return;}if(!state.reverted.includes(pair.dataset.pair))state.reverted.push(pair.dataset.pair);status.textContent='Change popped in this example · Repair remains a proposal';render();save();return;}
+   const action=event.target.closest('[data-action]');if(action){const type=action.dataset.action;if(type==='minimize'){state.active=null;render();save();}if(type==='pop'){state.popped.push(state.active);state.active=null;status.textContent='Review popped · original document unchanged';render();save();}if(type==='pop-thought'){action.closest('.thought').hidden=true;root.querySelector('.restore').hidden=false;}return;}
+   if(event.target.closest('.restore')){state.popped=[];state.reverted=[];root.querySelectorAll('.thought').forEach(el=>el.hidden=false);state.active='pilot';status.textContent='Layout study · 3 example reviews';render();save();return;}
+   if(event.target.closest('.review-group'))return;
+   if(state.active){state.active=null;render();save();}
+ });
+ window.addEventListener('openai:set_globals',event=>{adopt(event.detail?.globals?.widgetState?.privateContent);render();});
+ new ResizeObserver(()=>{clearLink();place();}).observe(root.querySelector('.document'));
+ render();
+ if(globalThis.Tweak){const design={expanded:'Pilot plan',writingWidth:420};const tweak=new Tweak({container:root,onChange:()=>{state.active=design.expanded==='Pilot plan'?'pilot':design.expanded==='Introduction'?'opening':design.expanded==='Next steps'?'ending':null;root.style.setProperty('--writing-width',design.writingWidth+'px');render();save();}});tweak.addSelect(design,'expanded',{label:'Expanded review',options:['Pilot plan','Introduction','Next steps','All minimized']});tweak.addSlider(design,'writingWidth',{label:'Writing column',min:380,max:460,step:10,unit:'px'});}
+})();
+</script>

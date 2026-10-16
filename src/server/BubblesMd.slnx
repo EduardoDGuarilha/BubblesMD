@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="BubblesMd.Server.Tests/BubblesMd.Server.Tests.csproj" />
+  <Project Path="BubblesMd.Server/BubblesMd.Server.csproj" />
+</Solution>
