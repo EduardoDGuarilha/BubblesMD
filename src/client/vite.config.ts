@@ -11,6 +11,8 @@ export default defineConfig({
   build: {
     outDir: '../server/BubblesMd.Server/wwwroot',
     emptyOutDir: true,
+    // Tiptap + CodeMirror + marked in one bundle (~1.2 MB, ~400 kB gzip); acceptable for this single-page editor.
+    chunkSizeWarningLimit: 1500,
   },
   test: {
     environment: 'jsdom',

@@ -82,8 +82,10 @@ export function ReviewLayer({ store, state, handle, scrollerRef, tick, narrow, r
   useLayoutEffect(() => {
     const el = familyRef.current;
     if (!el || !layout.family || narrow) return;
-    const h = el.offsetHeight;
     const { visTop, visBottom } = layout;
+    // Bound the family to the visible review space; taller content scrolls inside it so every reflection stays reachable.
+    el.style.maxHeight = `${Math.max(160, visBottom - visTop - 24)}px`;
+    const h = el.offsetHeight;
     let top = layout.family.anchorTop - 26;
     if (h + 24 < visBottom - visTop) top = Math.min(Math.max(top, visTop + 12), visBottom - h - 12);
     else top = visTop + 12;

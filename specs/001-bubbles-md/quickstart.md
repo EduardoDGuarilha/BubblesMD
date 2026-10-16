@@ -1,6 +1,6 @@
 # Build quickstart
 
-The specification is prepared; the application is not scaffolded or runnable yet.
+The application is implemented; the root [README](../../README.md) has the verified setup, run and test commands.
 
 1. Open C:/fnt/BubblesMD in Claude and use START_HERE.md's build prompt when ready.
 2. Read the current spec/design/plan and short tasks.md; inspect the design references with their overrides.

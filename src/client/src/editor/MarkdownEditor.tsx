@@ -3,13 +3,28 @@ import { Annotation, EditorState, StateEffect, StateField, type Range } from '@c
 import { Decoration, EditorView, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
 import type { ChangeKind } from '../core/changes';
 import { diffText, type Hunk } from '../core/textChanges';
 import { KIND_LABEL } from './FormattedEditor';
 import type { DecorationSpec, EditorCallbacks, EditorHandle } from './types';
 
 const External = Annotation.define<boolean>();
+
+/** Quiet, theme-aware Markdown highlighting that uses the app's CSS variables in light and dark mode. */
+const markdownHighlight = HighlightStyle.define([
+  { tag: tags.heading, fontWeight: '650' },
+  { tag: tags.heading1, fontSize: '1.15em' },
+  { tag: tags.strong, fontWeight: '700' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strikethrough, textDecoration: 'line-through' },
+  { tag: tags.link, color: 'var(--edge)' },
+  { tag: tags.url, color: 'var(--quiet)' },
+  { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator], color: 'var(--quiet)' },
+  { tag: tags.quote, color: 'var(--quiet)' },
+  { tag: tags.monospace, color: 'var(--ink)' },
+]);
 const setDecorations = StateEffect.define<DecorationSet>();
 
 const decorationField = StateField.define<DecorationSet>({
@@ -75,7 +90,7 @@ export const MarkdownEditor = forwardRef<EditorHandle, Props>(function MarkdownE
             ...defaultKeymap,
           ]),
           markdown(),
-          syntaxHighlighting(defaultHighlightStyle),
+          syntaxHighlighting(markdownHighlight),
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ 'aria-label': 'Document (Markdown source)', spellcheck: 'true' }),
           decorationField,

@@ -42,6 +42,7 @@ public static class PromptBuilder
         sb.Append(Fence("CONTEXT_BEFORE", r.ContextBefore));
         sb.Append(Fence("SELECTION", r.Selection));
         sb.Append(Fence("CONTEXT_AFTER", r.ContextAfter));
+        AppendWordBoundaryNotes(sb, r.ContextBefore ?? "", r.Selection ?? "", r.ContextAfter ?? "");
         sb.Append("\nWriter's reflections (instructions):\n");
         var i = 1;
         foreach (var reflection in (r.Reflections ?? []).Where(x => !string.IsNullOrWhiteSpace(x.Text)))
@@ -66,5 +67,27 @@ public static class PromptBuilder
             }
         }
         return (System, sb.ToString());
+    }
+
+    /// <summary>Selections that cut through a word are easy to mis-handle; state the fragment explicitly.</summary>
+    private static void AppendWordBoundaryNotes(StringBuilder sb, string before, string selection, string after)
+    {
+        if (selection.Length == 0) return;
+        if (before.Length > 0 && char.IsLetterOrDigit(before[^1]) && char.IsLetterOrDigit(selection[0]))
+        {
+            var start = before.Length;
+            while (start > 0 && char.IsLetterOrDigit(before[start - 1])) start--;
+            var fragment = before[start..];
+            sb.Append($"\nNote: the selection starts in the middle of a word. The text just before it ends with \"{fragment}\", " +
+                      $"which stays in the document, so the replacement must continue \"{fragment}\" and must not repeat it.\n");
+        }
+        if (after.Length > 0 && char.IsLetterOrDigit(after[0]) && char.IsLetterOrDigit(selection[^1]))
+        {
+            var end = 0;
+            while (end < after.Length && char.IsLetterOrDigit(after[end])) end++;
+            var fragment = after[..end];
+            sb.Append($"\nNote: the selection ends in the middle of a word. The text just after it begins with \"{fragment}\", " +
+                      $"which stays in the document, so the replacement must end in a way that \"{fragment}\" still completes.\n");
+        }
     }
 }

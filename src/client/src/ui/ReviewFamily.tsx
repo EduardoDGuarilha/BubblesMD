@@ -50,7 +50,7 @@ export function ReviewFamily({ store, state, review, raw, hovered, offscreen, on
         {pairText(version, hovered) ?? summary}
         {offscreen && (
           <button type="button" className="link-button back" onClick={onBackToPassage}>
-            ↑ Back to passage
+            Back to passage
           </button>
         )}
       </div>

@@ -4,20 +4,49 @@
     {
       "name": "api-fake",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/server/BubblesMd.Server", "--launch-profile", "http", "--", "--Bubbles:Provider=fake"],
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/server/BubblesMd.Server",
+        "--launch-profile",
+        "http",
+        "--",
+        "--Bubbles:Provider=fake"
+      ],
       "port": 5180
     },
     {
       "name": "api",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "src/server/BubblesMd.Server", "--launch-profile", "http"],
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/server/BubblesMd.Server",
+        "--launch-profile",
+        "http"
+      ],
       "port": 5180
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "src/client", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "src/client",
+        "run",
+        "dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "published",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "publish/BubblesMd.Server.dll",
+        "--urls",
+        "http://localhost:5190"
+      ],
+      "port": 5190
     }
   ]
 }

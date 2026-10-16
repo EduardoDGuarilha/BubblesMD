@@ -622,8 +622,12 @@ button:disabled {
 
 .family {
   position: absolute;
-  left: 66px;
-  width: min(calc(100% - 84px), 520px);
+  left: 34px;
+  width: min(calc(100% - 52px), 552px);
+  padding: 0 4px 6px 32px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   z-index: 6;
   animation: bubble-in 0.18s ease-out;
 }
@@ -777,6 +781,11 @@ button:disabled {
 .candidate code {
   font-family: var(--mono);
   font-size: 0.9em;
+}
+
+.candidate a {
+  color: inherit;
+  text-decoration-color: var(--edge);
 }
 
 .candidate.raw .cand-raw {

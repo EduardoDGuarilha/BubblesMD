@@ -310,7 +310,7 @@ export class WorkspaceStore {
   // ---- reviews ------------------------------------------------------------------------------------------------
 
   createReview(from: number, to: number): string | null {
-    if (from >= to) return null;
+    if (from < 0 || to > this.state.tracked.md.length || from >= to) return null;
     const id = uid();
     const before = this.state.tracked;
     this.commit(createReview(before, id, from, to), undefined, { expanded: id });

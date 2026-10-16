@@ -2,7 +2,10 @@ using System.Diagnostics;
 using BubblesMd.Server.Suggest;
 using Microsoft.Extensions.Options;
 
-var builder = WebApplication.CreateBuilder(args);
+// A published build carries wwwroot next to the DLL: use that folder as content root so the app starts correctly
+// from any working directory. `dotnet run` keeps the default (project folder).
+var publishedRoot = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot")) ? AppContext.BaseDirectory : null;
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = publishedRoot });
 
 builder.Services.Configure<BubblesOptions>(builder.Configuration.GetSection("Bubbles"));
 builder.Services.AddSingleton<KeyResolver>();
