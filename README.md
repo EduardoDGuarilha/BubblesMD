@@ -29,7 +29,9 @@ Several reviews can be pending at once. Minimized ones sit as small ••• bu
 
 ## Demo
 
-[Demo video](docs/demo/bubbles-md-demo.mp4) (74 s, 1080p, 2.8 MB; compressed from the original screen recording).
+https://github.com/user-attachments/assets/3a03e9ea-082a-4574-b460-3706fad4e42c
+
+[Download the demo](docs/demo/bubbles-md-demo.mp4) (74 s, 1080p, 2.8 MB; compressed from the original screen recording).
 
 > While demonstrating Bubbles.MD to a friend using a Harry Potter fanfic, I asked it to replace a mention of Harry
 > with his best friend's name. I hadn't noticed that Hermione was also mentioned in the paragraph.
