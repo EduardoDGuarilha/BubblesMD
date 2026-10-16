@@ -1,439 +1,205 @@
 # Bubbles.MD
 
 A Markdown editor that turns your reflections about a selected passage into a reviewable alternative. Select text,
-think out loud in connected thought bubbles on the right, and review a software-computed diff of the AI's proposal.
-Pop individual edits, refine with more reflections, then **Accept** (one undoable step) or **Reject**. Nothing in
-your document changes until you accept.
+think out loud in connected thought bubbles beside it, and review the AI's proposal as a software-computed diff. Pop
+the individual edits you don't want, add reflections to refine it, then **Accept** it as one undoable step or
+**Reject** it. Nothing in your document changes until you accept.
 
-Built for the Chiri engineering assessment: React + TypeScript (Vite, Tiptap, CodeMirror 6) client and a C# /
-ASP.NET Core 10 Minimal API that keeps the OpenRouter key server-side.
+Built for the Chiri engineering assessment. The client is React + TypeScript (Vite, Tiptap, CodeMirror 6). The
+server is a C# / ASP.NET Core 10 Minimal API that keeps the OpenRouter key server-side.
+
+## The interaction
+
+1. **Select** a passage and press **+ Bubble** (it appears just above the selection), or press Ctrl/Cmd+Alt+M.
+2. **Reflect.** Write what should change in the first thought bubble. Enter submits it; Shift+Enter adds a line.
+   Selecting, creating and typing never call the model.
+3. **Review.** The suggestion bubble holds exactly the replacement for your selection, compared with the original:
+   - added text is green, with a green **+** at the insertion point in your document;
+   - altered wording is yellow on both sides;
+   - deleted wording is outlined in red in your document, with a red **−** at the deletion point in the suggestion.
+
+   Hovering a change highlights both sides together.
+4. **Pop** any single change by clicking it on either side. It falls back to the original wording in the proposal, and
+   the document stays untouched.
+5. **Refine** by submitting another reflection; an updated suggestion is requested from all your reflections and your
+   pops. **Try again** regenerates explicitly.
+6. **Decide.** Accept replaces only that passage, as one undoable step. Reject discards the review.
+
+Several reviews can be pending at once. Minimized ones sit as small ••• bubbles beside their passages.
+
+## Demo
+
+[Demo video](docs/demo/bubbles-md-demo.mp4) (74 s, 1080p, 2.8 MB; compressed from the original screen recording).
+
+> While demonstrating Bubbles.MD to a friend using a Harry Potter fanfic, I asked it to replace a mention of Harry
+> with his best friend's name. I hadn't noticed that Hermione was also mentioned in the paragraph.
+>
+> Instead of simply substituting Ron Weasley, the app declined the edit and explained the ambiguity. It caught
+> something I had overlooked in my own instruction.
+>
+> The video also shows how additional reflections guide a suggestion and how individual changes can be popped. For
+> me, the unexpected refusal illustrates the same principle: context should help expose uncertainty, while the writer
+> keeps control of the final decision.
+>
+> I kept this unscripted demo because that moment felt a little magical, no pun intended. :)
+
+*Recorded before the final scrolling correction. The scroll-position bug visible in this video has since been fixed.*
 
 ## Run it
 
-Prerequisites: .NET SDK 10, Node.js 20.19+ (npm), and an OpenRouter key.
+Prerequisites: .NET SDK 10, Node.js 20.19+ with npm, and an OpenRouter key. The commands below were used on Windows.
 
-1. **Configure the key (Windows, once).** In your own PowerShell terminal (the key is not echoed and not stored in history):
+1. **Configure the key (once).** In your own PowerShell terminal (the key is not echoed or stored in history):
 
    ```powershell
    $k = Read-Host 'OpenRouter key' -AsSecureString; [Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', [Net.NetworkCredential]::new('', $k).Password, 'User')
    ```
 
-   On Windows the server reads the current user-scope value from the registry on every request, so no restart is
-   needed. Elsewhere, set `OPENROUTER_API_KEY` in the server's environment. The key never reaches the browser, logs
-   or repository files.
+   On Windows the server reads the current user-scope value from the registry on each request, so no restart is
+   needed. Elsewhere, set `OPENROUTER_API_KEY` in the server's environment.
 
-2. **Build and run the single published app:**
+2. **Build and run the published app:**
 
    ```powershell
    pwsh -File scripts/build.ps1
    dotnet publish/BubblesMd.Server.dll --urls http://localhost:5180
    ```
 
-   Open http://localhost:5180. `scripts/build.ps1` runs `npm ci`, builds the client into the server's `wwwroot`, and
-   `dotnet publish`es to `./publish` (no database, Docker or migrations).
+   Open http://localhost:5180. `scripts/build.ps1` runs `npm ci`, builds the client into the server's `wwwroot` and
+   publishes to `./publish`. There is no database, Docker or migration step.
 
 **Development mode** (hot reload), in two terminals:
 
 ```powershell
-dotnet run --project src/server/BubblesMd.Server            # API on http://localhost:5180
-npm --prefix src/client install; npm --prefix src/client run dev   # UI on http://localhost:5173 (proxies /api)
+dotnet run --project src/server/BubblesMd.Server --launch-profile http   # API on http://localhost:5180
+npm --prefix src/client install; npm --prefix src/client run dev         # UI on http://localhost:5173 (proxies /api)
 ```
 
-**Zero-cost fixture mode:** start the server with `--Bubbles:Provider=fake`. The fake provider deterministically
-alters, deletes and adds words. These reflection keywords drive failure cases: `#slow`, `#fail`, `#malformed`,
-`#unchanged`, `#cannot`, `#delete`, `#same` (no change at first, a real change after the correction), `#stubborn`
-(no change even after the correction) and `#newline` (a replacement with a stray trailing line break).
+**Zero-cost fixture mode.** Append `-- --Bubbles:Provider=fake` to the `dotnet run` command. The fake provider
+deterministically alters, deletes and adds words. Reflection keywords trigger edge cases:
+- `#slow`, `#fail`, `#malformed`;
+- `#unchanged`, `#cannot`, `#delete`;
+- `#same` (a real change only after the correction), `#stubborn` (no change even after it);
+- `#newline` (a stray trailing line break).
 
-**Checks:** `npm --prefix src/client test` (Vitest) and `dotnet test src/server/BubblesMd.slnx` (xUnit).
-
-## Using it
-
-- **Start:** create a document or open/drop a `.md` file (≤ 1 MiB, read locally; nothing is sent anywhere). Saved
-  work in this browser reopens automatically. New/Open on an existing document asks before replacing it, and offers
-  Export first. The **Bubbles.MD** title goes back to the start page with the same confirmation (Export current /
-  Leave / Cancel); after leaving, a reload stays on the start page and the spending record is kept.
-- **Ask:** select text, then press the **+ Bubble** action that appears just above it (below it at the top edge), or
-  Ctrl/Cmd+Alt+M, and write a reflection. The action keeps still under the pointer; in Formatted view Tab reaches it
-  (in Markdown view Tab indents, so use the shortcut). Enter submits it; Shift+Enter adds a line. Selecting, creating and typing never call the model.
-- **Review:** the suggestion bubble contains exactly the replacement for your selection.
-  - Yellow marks altered wording, red marks deleted wording, and a green **+** marks added text. In the suggestion,
-    a red **−** marks each deletion point. Changed spacing shows ␣ and a changed line break ↵ (symbols only).
-  - Hover or focus any change to highlight the matching spans on both sides (their own outlines grow stronger).
-  - Click a change on either side, or press Enter on it, to **pop** it: an alteration or deletion falls back to the
-    original wording, and an addition is removed. Popping never changes the document and never calls the model.
-- **Refine:** submit another reflection with Enter and an updated suggestion is requested directly. Blur only saves it.
-  **Try again** regenerates explicitly (**Refresh** when the passage changed; **Retry** only after a failure). Popped
-  edits are sent as explicit "keep original" choices, and a chip flags any kept wording that went missing or a removed
-  addition that came back.
-- **No change:** if a result is identical to what it should improve, it is not installed. The server makes one
-  corrective call (both are counted); if that also makes no change, your previous proposal stays and Retry appears.
-- **Decide:** Accept replaces only that passage, as one undoable step. Reject or × discards the review and leaves the
-  document unchanged.
-- **Navigate:** Escape or a click outside minimizes the review to a ••• marker beside its passage. Nearby markers
-  form a small staggered cluster that never reshuffles; the open review's marker keeps its place with a stronger rim.
-  Hovering or focusing a marker highlights its passage without opening it. Undo/Redo
-  (toolbar, Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z) restores document, reviews, reflections and pops together.
-- **Views:** switch between **Formatted** (Tiptap) and **Markdown** (CodeMirror) at any time. It is one document;
-  switching never edits or generates.
-- **Model and cost:** pick **Fast** (`anthropic/claude-haiku-5.5`) or **Smart** (`anthropic/claude-sonnet-5.5`,
-  default).
-  - Each suggestion shows its model and actual cost; details show tokens, latency, request and decision status.
-  - The toolbar total is the tracked spend for this app's requests in this browser, not your OpenRouter balance.
-  - Unknown cost is shown as unknown, never as $0.
+**Tests:** `npm --prefix src/client test` (Vitest, 45 tests) and `dotnet test src/server/BubblesMd.slnx` (xUnit, 14
+tests).
 
 ## How it works
 
-- **One canonical document.** The app store owns a single Markdown string. Both editors are adapters:
-  - CodeMirror reports exact change sets.
-  - Tiptap edits are serialized with `@tiptap/markdown` and diffed against the previous Markdown, using the
-    transaction's position as a hint so typing at a boundary is attributed correctly.
-  - External changes (undo, redo, accept) are applied to Tiptap as a minimal document replace.
-  - Neither editor's own undo history is used.
-- **Position bridge.** `core/bridge.ts` aligns ProseMirror text positions with Markdown offsets for selection
-  capture, decorations and bubble geometry.
-  - It skips block syntax, masks link destinations and decodes entities.
-  - It fails loudly rather than guessing when alignment is impossible.
-  - Content Formatted view cannot represent (tables, raw HTML, images, link definitions) makes that view read-only,
-    with a pointer to Markdown view.
-- **Anchors and staleness.**
-  - Review scopes are Markdown ranges, mapped through every edit; insertions at a boundary stay outside the scope.
-  - Fully deleting a target pops its review (undoable). An edit that overwrites only one boundary blocks the review
-    until you **Retarget** it.
-  - A candidate is actionable only while its captured source and ±120 characters of context are unchanged.
-  - Reopening an outdated review refreshes it once; failures need an explicit Retry.
-- **History.** Snapshot history covers the document text plus each review's status, anchor, reflections, active
-  candidate version and pops.
-  - Candidate payloads are immutable versions cached outside history, so Undo/Redo restores the matching version with
-    its own pops and never re-requests anything.
+- **Frontend (React + TypeScript).**
+  - **Editors.** Two views edit the same document: Formatted (Tiptap) and Markdown (CodeMirror 6).
+  - **Store.** A small store owns all state; React renders it.
+  - **Review space.** Bubble placement, clusters and connector dots are computed from measured geometry
+    (`core/geometry.ts`). The expanded review stays in view with CSS `position: sticky`.
+- **Backend (C# / ASP.NET Core 10).**
+  - `POST /api/suggest` validates request bounds, builds the prompt, calls OpenRouter and validates the model's
+    structured answer.
+  - `GET /api/config` lists the modes and their rates.
+  - The published build serves the client too.
+- **Document ownership.** The store owns one canonical Markdown string; both editors are adapters.
+  - CodeMirror reports exact change sets. Tiptap edits are serialized and diffed against the previous Markdown.
+  - Undo, redo and Accept are applied back to the editors as minimal replacements.
+  - Neither editor's own history is used. One app-level history covers the document text plus each review's anchor,
+    reflections, active suggestion version and pops.
+  - Suggestion versions are immutable and cached outside that history, so Undo/Redo never re-requests anything.
   - Spending is never undone.
-- **Diff.** A deterministic token-level diff (jsdiff) groups adjacent removals and insertions into altered / added /
-  deleted changes with stable ids. Accept applies the non-popped groups to the exact scope.
-- **Requests.**
-  - One request is in flight across the app; others show Busy and nothing is queued.
-  - × cancels a request; a late result is ignored but its cost is still recorded.
-  - On reload, an unfinished request becomes "Interrupted" and is never replayed.
-- **Server.** `POST /api/suggest` validates bounds (16,000 selected characters, 4,000 context, 8,000 reflection
-  characters, 256 KB body).
-  - It fences document text with per-request random markers, so text inside the document cannot pose as
-    instructions.
-  - It calls OpenRouter chat completions with a JSON-schema outcome (`replace` / `unchanged` / `cannot_apply`),
-    8,000 max output tokens and a 90 s timeout.
-  - It rejects truncated, malformed or unsafe output, and returns `usage.cost` (null when absent).
-  - When a result makes no change, it makes exactly one corrective call. That call sends the unsuccessful answer back
-    with an explanation and asks for a meaningful revision. Every call is reported with its usage.
-  - It makes no other retries or model fallbacks. `GET /api/config` lists modes and rates.
-- **Bubbles.** Soap-film surfaces (translucent fill, thin rim, a masked iridescent ring and a glint) are sized to their
-  content.
-  - Reflections form one wrapping chain laid out from measured sizes (`core/geometry.ts`); dots link consecutive
-    bubbles from their real edges, through the gaps between them.
-  - Minimized reviews are packed per local cluster on a honeycomb lattice (`placeMarkers`), and the family is placed
-    beside the clusters afterwards (`placeFamily`). Opening a review changes neither arrangement.
-  - The passage → suggestion dots take a short straight run when clear; otherwise they start from the active review's
-    miniature (straight or with one bend around its cluster), and are omitted rather than drawn through anything.
-  - Spacing includes the animation envelope (float, inflate overshoot, hover scale).
-  - Highlights (change pairs, passage peek) are one scoped style rule keyed by review id, so editor DOM is never
-    mutated and no overlay is drawn.
-  - Floating pauses under the pointer.
-  - Pops play the supplied recording `public/sounds/bubble-pop.mp3` (Universfield, "bubble pop 02"; file supplied by
-    Eduardo, license to be confirmed before publishing) with a short rupture animation, falling back to a synthesized
-    pop if it cannot be decoded.
-- **Persistence.** One versioned snapshot is stored in IndexedDB (idb-keyval) with serialized writes. "Saved" shows
-  only after a write completes; a failed write shows "Not saved" and keeps the document usable and exportable.
+- **Review safety.**
+  - **Anchors.** A review's scope is a Markdown range, mapped through every edit.
+  - **Staleness.** A suggestion can be accepted only while its captured passage and ±120 characters around it are
+    unchanged. Otherwise it is marked outdated and refreshed once when reopened.
+  - **Overwrites.** Deleting a passage entirely pops its review (undoable). Overwriting only one edge blocks the review
+    until you retarget it.
+  - **Requests.** One request runs at a time across the app. A late or cancelled result is ignored, but its cost is
+    still recorded. After a reload, an unfinished request shows as "Interrupted" and is never replayed.
+  - **Diff and Accept.** The diff is computed by ordinary code (token-level, jsdiff), not by the model. Accept applies
+    the non-popped changes to exactly the reviewed range.
+- **OpenRouter integration.**
+  - **Modes.** Fast (`anthropic/claude-haiku-5.5`) or Smart (`anthropic/claude-sonnet-5.5`, the default). The server
+    maps the mode to an allowlisted model; the browser never sends a model id or key.
+  - **Request and answer.** Chat completions with a JSON-schema answer (`replace`, `unchanged` or `cannot_apply` with
+    a reason), 8,000 max output tokens and a 90 s timeout. Truncated, malformed or unsafe output is rejected.
+  - **No-change correction.** If a result makes no change, the server makes exactly one corrective call, and both calls
+    are reported. There are no other retries or model fallbacks.
 
-## Storage and limits
+## Context, approval and spending
 
-- Recovery is per browser profile and site origin (`localhost:5173` and `localhost:5180` keep separate saves).
-  Clearing site data removes it, so use **Export .md** for anything you need to keep.
-- Undo history does not survive a reload (by design); the document and pending reviews do.
-- Formatted view supports paragraphs, headings, emphasis/strong/strike, links, lists, blockquotes, inline/fenced code,
-  hard breaks and rules.
-  - Editing there writes standard Markdown syntax (e.g. `__a__` becomes `**a**`).
-  - Line endings are normalized to `\n` on import.
+- **What the model sees:**
+  - the selected Markdown (up to 16,000 characters);
+  - up to 2,000 characters before and after it;
+  - your reflections (marked new or earlier);
+  - for refinements, the current proposal with your pops applied, plus your keep-original choices.
 
-## Verification performed
-
-Automated:
-- **Vitest (45):** (8 added in the correction pass: newline, history steps, refresh guard, geometry; 7 in the interaction pass: clusters, family and selection-action placement, connections, leaving a document; 9 in the change-marking pass: boundaries, saved-version compatibility, Markdown around markers, deletion markers; 1 in the scrolling pass: the sticky clamp rule)
-  - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
-    lists, Markdown-looking code, cross-block selections, loud failure.
-  - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
-    discard, full-deletion pop with undo, boundary-straddling block.
-  - Undo/Redo version linkage: pop on v1 → refine to v2 → Undo restores v1 with its pop and thoughts → Redo restores
-    v2 from cache with no request and unchanged spend; Accept → Undo while another review survives.
-  - Diff grouping and losslessness.
-  - Enter on a second reflection issues one refine with `isNew` and the effective proposal.
-  - An unchanged result is not installed: the previous version and reflections are kept, and both attempts are in
-    the ledger.
-  - Formatting-only changes and intentional deletions count as real changes.
-  - A refinement after a pop carries the keep-original choice and flags kept wording that went missing.
-  - Marker clusters: deterministic, staggered (neither a column nor a row), no overlap with the motion envelope or at
-    touch size, minimal push-down, narrow single column; family placement; connection choice (passage, miniature
-    straight or bent, none); selection-action placement.
-  - Leaving a document: in-flight request cancelled, late result ignored, spend kept, reload shows the start page.
-- **xUnit (14):**
-  - request bounds, outcome parsing with actual cost, unknown cost, empty replacement, truncated / malformed / unsafe
-    output, 402/429 mapping, prompt fencing and keep-original records;
-  - the no-change rule: whitespace vs. paragraph and formatting changes;
-  - exactly one correction, with both calls reported;
-  - still unchanged after the correction → no third call;
-  - the removed `revise` action is rejected by validation;
-  - a failed correction still reports the first call.
-
-Walked through in the in-app browser:
-- Import; select → + Bubble → reflection → candidate; pop from source and from candidate; Accept → Undo/Redo;
-  outside-click and Escape minimize.
-- Markdown view decorations, Accept there and Undo after switching back.
-- Reload recovery, and reload during generation (Interrupted, no replay).
-- Busy, edit-during-generation (installed as outdated), provider failure with Retry, cancel during generation,
-  Retarget, and keyboard pop.
-- Layouts: 1440×900, 1024×768, 1280×560 (offscreen source and a long three-reflection family) and 390×844.
-- Revision of 2026-10-16:
-  - a working slice measured in the real editor: plus icons centred (0 px offset), unchanged line height beside
-    insertion markers, content-sized reflections, computed dots;
-  - hover highlighting with no connector line;
-  - real clicks popping added (source +), altered (suggestion) and deleted (source) changes, with hover cleared;
-  - Enter-to-refine;
-  - fixture `#same` (corrected, 2 calls) and `#stubborn` (failure with Retry, proposal kept);
-  - Revise, including "nothing to revise" (the feature was removed in the 2026-10-16 interaction pass);
-  - a clustered markers / long family / generating state at 1440 and the docked dark layout at 390;
-  - regression checks after the revision: Accept/Undo/Redo, Markdown switch, outside-click minimize and reload
-    recovery.
-- The published app started from `./publish` and served UI, API and SPA fallback.
-
-Live OpenRouter calls: five completed for $0.0135 actual (returned `usage.cost`), plus one interrupted by a reload
-with unknown cost, well within the $5 key cap.
-- **Smart:** initial ($0.0044, 5.1 s) and refine respecting a popped keep-original choice and a two-sentence request
-  ($0.0085, 314 reasoning tokens).
-- **Fast:** outdated refresh ($0.00036, 3.8 s), a grammar/tone fix on the published build that kept the facts
-  ($0.00015), and the same mid-word selection after the prompt fix, which now continues the fragment correctly
-  ($0.00015).
-- **After the 2026-10-16 revision (all within the $5 cap):**
-  - Smart initial suggestion ($0.0042), then "too verbose" submitted with Enter: a genuinely shorter refinement on the
-    first call (53 → 44 words, $0.0048, no correction needed);
-  - Fast Revise after keeping one original phrase: coherent repair, nothing flagged ($0.00044). It also reworded one
-    later phrase beyond the minimal repair, which shows in the diff (Revise was later removed).
-
-**Correction pass of 2026-10-16** (placement, chain, Accept newline, Undo steps).
-
-Causes found:
-- Accepting "Eduardo shipped" added a line break because the stored model replacement was `"Eduardo shipped\n"`.
-  Accept applied it exactly; it is now removed for inline selections.
-- Undo landed on "Thoughts changed" because an Enter submission and its suggestion were two separate history entries.
-- Reflections were laid out independently, and their dots and the passage dots ran over other bubbles and minimized
-  reviews.
-
-Verified:
-- **Reproduced each failure first in the dev editor:** two lines after Accept; two entries per Enter refine with Undo
-  landing on "Thoughts changed"; passage dots crossing a minimized review.
-- **Real editor, after the fixes:**
-  - Accept in mid-paragraph stays in one paragraph, and immediate Undo/Redo restores and re-applies with no request.
-  - Enter refine is one Undo step; a failed Enter submission shows "Update failed — previous suggestion shown" with
-    Retry and "Not yet applied".
-  - A multiline reflection grows while typing, with Shift+Enter kept as a newline.
-  - Opening a review beside three minimized reviews.
-  - Bounds measured at 1440, 1024 (also scrolled) and 390: 0 bubble overlaps and 0 dot contacts, including the motion
-    envelope.
-  - The recording decodes in the app; audible playback could not be checked from here.
-- **Live Fast calls ($0.00038):** "it was only eduardo" → "Eduardo shipped", accepted inline; a refine submitted with
-  Enter.
-- **Tests:** Vitest 28/28, xUnit 14/14.
-
-**Interaction pass of 2026-10-16** (clusters, connections, peek, highlights, +, selection action, Try again, Revise
-removed, title navigation).
-
-Causes found:
-- Opening a review reshuffled the markers for two reasons. The open review was left out of marker placement, so the
-  others re-slotted. And the open review's insertion + re-wrapped a line, which moved later anchors.
-- The old placement used two fixed columns, which made the grid look.
-- Hover drew rectangles over the already-rounded decorations: an offset duplicate outline.
-- The inline + sat low because its inline-grid took its baseline from the SVG; in Markdown headings it was outside
-  the enlarged token.
-- Touch-size (44 px) markers were spaced as 34 × 24.
-
-Verified in the real editor (fixture provider):
-- **Five reviews on nearby lines:**
-  - a staggered 2-2-1 cluster;
-  - each review opened in turn with every marker position identical, and identical again after minimizing;
-  - the active rim and `aria-pressed`;
-  - every review connected (four from their miniature, one from the passage);
-  - hover and focus on each marker highlighted only its passage, with no request, and overlapping reviews stayed
-    distinct.
-- **Layout:** 0 marker overlaps, 0 markers on bubbles and 0 dot contacts at 1440, at 1024 (also scrolled) and at 390
-  (single column, touch size, docked family, no horizontal scroll).
-- **Highlights:** a wrapped deletion ringed per line fragment, on exactly that review's source span and candidate
-  marker, with no layout shift.
-- **Insertion +:** circle centre against the text centre: paragraph +0.19 px, bold +0.19, heading +0.77, Markdown
-  +0.69, Markdown heading +0.09 (cap-height centre within 1 px too). Line heights are unchanged.
-- **Selection action:**
-  - centred 6 px above a word;
-  - above the first line of a two-line drag selection;
-  - clamped at the left edge, and below the line at the top edge;
-  - back above after scrolling, and re-measured after a resize;
-  - still under pointer approach;
-  - click, Tab + Enter (Formatted) and Ctrl/Cmd+Alt+M (Markdown) each created the review from exactly the selection.
-- **Title:**
-  - Cancel kept everything;
-  - Leave with a 4 s request in flight showed the start page, and the request stayed in spend as "cancelled · charge
-    unknown" with no late install;
-  - a reload stayed on the start page, with all 48 ledger entries kept.
-- **Regressions:** Enter submission (one Undo step), Try again (refine), pop by clicking the source (no request),
-  Accept → Undo → Redo with no request, Markdown marks with review ids, and the recording decodes.
-- **Published build:** UI, `/api/config` and SPA fallback.
-- **One live Fast call ($0.0002):** "honestly the results was kind of good and people liked it alot" → "...were kind of
-  good and people liked it a lot", keeping the casual tone.
-- **Tests:** Vitest 35/35, xUnit 14/14.
-
-**Change-marking pass of 2026-10-16** (boundaries, Markdown around markers, red −, borders, close icons, tip strip).
-
-The reported screenshots were investigated by running their *transcribed* text through the app's diff and renderer.
-The original saved candidates were not available.
-
-Causes found:
-- **Grouping.** Change runs separated by one kept space were merged with that space on both sides. So
-  `term when` → `term, the kind of day when` became an alteration of a single space (a tiny yellow mark), and groups
-  carried shared edge spaces.
-- **Rendering.** The invisible marker characters count as letters for Markdown emphasis rules, so
-  `that ` + marker + `**[Albus Dumbledore](…)**` no longer opened bold and showed literal `**`.
-- **Not a defect.** The second screenshot kept the word "when", so word-level fidelity correctly shows it between
-  two separate changes.
-
-Changes:
-- **Boundaries.** Whitespace both sides share at a group's edge moves to the surrounding text, and each group is
-  classified from what remains.
-  - Ids, order, text and pops are unchanged.
-  - Saved versions are normalized the same way when loaded.
-- **Markers.**
-  - A marker cluster touching a `*`/`_`/`~` run moves across it only when that restores the run's flanking. A marker
-    at a line start moves past the block marker.
-  - Every render is verified against the marker-free parse. A change that still cannot be marked inline is listed by
-    its own text under the suggestion, still hoverable, source-linked and poppable.
-- **Red −** at deletion points; ␣/↵ symbols for whitespace-only changes.
-- **Rounded-rectangle source outlines** and geometric close icons.
-- **The Formatted-view tip strip is removed.**
-
-Verified:
-- **A review saved before the fix (the transcribed screenshot-2 text, with one pop), reloaded after it:**
-  - the one-space alteration became an Added group;
-  - the pop was kept and the text was identical;
-  - no request was made;
-  - the bold link rendered.
-- **Real editor:**
-  - the comma insertion shows a green + and ", the kind of day";
-  - three red − markers, each within 0.69 px of the text centre;
-  - hover and focus on a − rang exactly the matching source deletion; click and Enter popped it with no document
-    change and no request;
-  - a whole-selection deletion shows one − and its note;
-  - the ␣ and ↵ symbols left paragraph heights unchanged and kept the line break;
-  - the long alteration wraps with its highlight;
-  - every close/minimize icon sits exactly centred (0 px) in its 26 px (22 px) hit area;
-  - there is no tip strip;
-  - checked in light and dark.
-- **Regressions:**
-  - Enter refine (one call, one step);
-  - Try again / Retry;
-  - `#same` correction (2 entries);
-  - stable clusters and peek;
-  - Accept/Undo/Redo;
-  - reload recovery;
-  - sound decode after a gesture;
-  - title dialog;
-  - spend.
-- **Tests:** Vitest 44/44 (added: boundary normalization, exact Accept with a pop, saved-version compatibility, and the
-  renderer cases for bold, emphasis and strikethrough links, partially changed bold, the listed fallback, and
-  deletion markers), xUnit 14/14.
-
-**Selection and scrolling pass of 2026-10-16** (scroll jump on creation, missing "+ Bubble", clamped-scroll lag).
-
-Causes fixed:
-- **Scroll jump.** The first reflection was focused (plain `focus()`) before the new family had a position, so the
-  browser scrolled toward the top of the rail. It now focuses with `preventScroll`. The family is placed before the
-  first paint and stays transparent until then.
-- **Missing "+ Bubble".** The just-used range stayed suppressed forever. Suppression now lasts only while that
-  selection is unchanged: it is cleared by a new pointer gesture, a different selection, a new document, an edit or a
-  view switch.
-- **Clamped-scroll lag.** A family clamped to the viewport was repositioned only after a React round trip (one frame
-  late, 4 px per frame in the investigation).
-  - The family is now `position: sticky` in a full-height track. A spacer holds its natural top; a margin would stop
-    sticky from moving it up.
-  - The browser applies the clamp on every scrolled frame.
-  - One placement function, run after each render and from the scroll event, keeps cached geometry and redraws the
-    connection with the same clamp rule (`clampFamilyTop`).
-  - Scrolling no longer re-measures every review.
-
-Verified in the real editor (disposable 36-paragraph document, fixture provider, saving switched off at runtime):
-- **Sticky gate, before the rest of the refactor.**
-  - The first arrangement, with a margin-based natural top, never bottom-clamped. It was corrected to a spacer.
-  - Then `clampFamilyTop` matched the rendered position within 0.13 px over 263 scroll offsets each for a
-    mid-document review, a review at the document end and a tall family. Within 0.5 px after resizes and with a grown
-    reflection (whole-pixel snapping).
-  - Both clamps occurred.
-  - Inputs, controls, markers, document selection and outside-click minimize worked through the
-    `pointer-events: none` track.
-- **Per-frame scrolling** (4 px and 20 px per frame, plus a tall family and Markdown view), each frame read, then
-  forced through a full React placement and read again:
-  - 0 delayed family corrections in 650 frames;
-  - dots identical within 0.1 px;
-  - markers never moved;
-  - unclamped, the family kept its offset to the passage.
-- **Creation at the document end, Formatted and Markdown:**
-  - `scrollTop` is unchanged at the focus call, at `focusin` and after settling (3398 and 3401);
-  - the family sits 30 px above its passage, in view, without "Back to passage";
-  - the reflection is focused.
-- **Dismissal:**
-  - right after creation the unchanged selection stays suppressed;
-  - create → Undo and create → pop, then reselect the same range: the action shows, by pointer and by Shift+arrows,
-    in both views;
-  - a new document with the same offsets, a source edit and a view switch carry no suppression;
-  - a control (the same range, nothing in between) stays suppressed.
-- **Short regression:** Enter refinement (one call, one step), Back to passage, Undo, title dialog, recovery on
-  reload, sound, spend.
-- **Tests:** Vitest 45/45 (added: the sticky clamp rule), xUnit 14/14.
+  Document text is placed inside per-request random fences and described as content, not instructions. That reduces
+  the risk of text in a document steering the model; it does not rule it out.
+- **Human approval.** The model only proposes a replacement for the captured range. Your document changes only when
+  you press Accept, and Accept can be undone. The model may also decline (`cannot_apply`) and explain why, as in the
+  demo.
+- **Spending.**
+  - Each suggestion shows its model and the actual cost OpenRouter returned (`usage.cost`), with token counts and
+    latency in its details.
+  - The toolbar total sums the tracked calls made by this app in this browser. It is not your OpenRouter balance.
+  - A cost that wasn't returned is shown as unknown, never as $0.
+- **Local data.**
+  - Documents, reviews and the spending record live in this browser's IndexedDB.
+  - Nothing is stored on the server; only suggestion requests leave the browser.
+  - This is local recovery, not a backup: use **Export .md** to keep a document.
 
 ## Known limitations
 
-- Very large documents are serialized and diffed on every Formatted keystroke; this is fine for typical documents and
-  untested near the 1 MiB import limit.
-- A selection that cuts through a word is sent as-is. The prompt now states mid-word boundaries; this fixed the one
-  observed case, but a model can still produce an awkward join, so check the diff before accepting.
-- The no-change check is textual: it proves the text changed, not that it improved. A refinement may reword more than
-  asked; the diff shows it and each edit can be popped.
-- While a review is open, the markers keep the positions measured with every review minimized. When the open
-  review's insertion + re-wraps a line, markers of later passages can sit up to a line away from them until it closes.
-- If the family is clamped to the viewport and every straight or one-bend route is blocked, no connection is drawn
-  (seen once: a top-row marker scrolled near the top edge).
-- A deleted (or inserted) word includes the one space removed (or added) with it, so its outline or highlight covers
-  that space. Only spaces kept on both sides are moved outside a change.
-- In rare cases a change cannot be marked inline without changing how the Markdown renders, for example punctuation
-  added directly against `**[link](…)**`. It is then listed under the suggestion by its text ("Not marked inline")
-  instead of being highlighted in place. It stays paired with the source and poppable.
-- The connection dots are drawn from the scroll event, not by CSS. When the browser scrolls on its compositor thread
-  faster than the page produces frames, the dots can trail by a frame while the family itself (CSS sticky) cannot.
-  JavaScript can't observe those compositor frames. The tool's wheel scrolling moves in large steps, so smooth wheel
-  scrolling was not sampled frame by frame.
-- The sticky track's lower limit (a family that would extend past the end of the rail) could not be reached: the
-  rail always extends past the last passage. The clamp rule models it, but untested.
-- The selection action hides when a selection is taller than the visible area (neither above nor below fits);
-  Ctrl/Cmd+Alt+M still works.
-- Thought dots are recomputed on every layout pass but do not follow the ±1.5 px float exactly.
-- The pop sound uses Web Audio and may be silent until the page has had a user gesture.
-- No accounts, sync, multiplayer or server storage (by design). Browser storage is local recovery, not a backup.
+- **Possible model mistakes.**
+  - The no-change check is textual: it proves the text changed, not that it improved.
+  - A refinement can reword more than asked. The diff shows it, and each change can be popped.
+- **Mid-word selections.** A selection that cuts through a word is sent as-is, and the model may produce an awkward
+  join; check the diff before accepting.
+- **Formatted view coverage.**
+  - Formatted view edits paragraphs, headings, emphasis, links, lists, quotes, code and rules.
+  - Tables, raw HTML, images and link definitions make it read-only, with a pointer to Markdown view.
+  - Editing there writes standard Markdown syntax (for example `__a__` becomes `**a**`).
+- **Large documents.** Very large documents are serialized and diffed on every Formatted-view keystroke. This is fine
+  for typical documents but untested near the 1 MiB import limit.
+- **Inline marking fallback.** In rare cases a change can't be highlighted inline without altering how its Markdown
+  renders (for example punctuation added right against `**[link](…)**`). It is then listed under the suggestion as
+  "Not marked inline", still paired with the source and poppable.
+- **Connector dots while scrolling.** The dots between passage and suggestion are redrawn by JavaScript, so they can
+  trail by a frame during very fast compositor scrolling; the suggestion itself cannot. With a crowded cluster near a
+  viewport edge, the connection may be omitted rather than drawn through other bubbles.
+- **Recovery scope.** Undo history doesn't survive a reload; the document and pending reviews do. Recovery is per
+  browser and site origin.
+- **By design:** no accounts, sync, collaboration or server-side storage.
 
 ## With more time
 
-- A Playwright end-to-end suite for the browser journeys walked through manually above.
-- A broader evaluation of Fast vs. Smart on the twelve-case bank in `docs/research/stack-and-models.md`.
-- Optional reasoning-effort control per mode.
-- Incremental (block-level) serialization for very large documents.
-- Code-splitting the editor bundle.
+- A Playwright suite for the browser journeys that were checked by hand.
+- A wider Fast-vs-Smart evaluation on a fixed set of editing tasks.
+- Block-level incremental serialization for large documents, and code-splitting the editor bundle.
+
+## Development record
+
+- **[AI development sessions](docs/ai-sessions/README.md):** the genuine Claude Code conversations, exported with the
+  app's own export, with the redactions listed there.
+- **[Verification log](docs/verification-log.md):** what was checked in each development pass, with measurements and
+  the defects found and fixed.
+- **[Build notes](docs/progress.md):** a short chronological log.
+- **[Product specification](specs/001-bubbles-md/spec.md), [design](specs/001-bubbles-md/design.md) and
+  [plan](specs/001-bubbles-md/plan.md):** the decisions this build follows.
 
 ## Repository layout
 
 - `src/client/`: React app.
-  - `core/`: pure document, anchor, diff, bridge and history logic, with tests.
+  - `core/`: document, anchor, diff, bridge, history and geometry logic, with tests.
   - `editor/`: Tiptap and CodeMirror adapters.
-  - `state/`: store and request lifecycle, with tests.
-  - `ui/`: bubbles, toolbar, landing.
-- `src/server/`: ASP.NET Core API (`BubblesMd.Server`) and tests (`BubblesMd.Server.Tests`).
-- `specs/001-bubbles-md/`: product spec, design, plan and acceptance guidance this build follows.
-- `docs/progress.md`: build notes. `docs/ai-sessions/`: genuine development session exports.
+  - `state/`: the store and request lifecycle, with tests.
+  - `ui/`: bubbles, toolbar and landing page.
+- `src/server/`: the ASP.NET Core API (`BubblesMd.Server`) and its tests (`BubblesMd.Server.Tests`).
+- `specs/001-bubbles-md/`: product specification, design, plan and acceptance guidance.
+- `docs/`: development records, plus `docs/demo/` and `docs/research/`.
 - `samples/pilot-plan.md`: a sample document.
+
+## Credits
+
+- **Pop sound.** `src/client/public/sounds/bubble-pop.mp3` is byte-identical to a file Eduardo supplied as
+  `universfield-bubble-pop-02-293341.mp3`. The name suggests "Bubble Pop 02" by Universfield; the file carries no
+  metadata and no license text is included.
+  - **Before publishing:** confirm the source page and its license terms, or remove the file. The app then falls back
+    to a synthesized pop.

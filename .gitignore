@@ -31,6 +31,5 @@ src/server/BubblesMd.Server/wwwroot/
 publish/
 *.tsbuildinfo
 
-# Raw session exports stay untracked until reviewed: they contain the author's global
-# instructions and email (no credentials found). Remove this line once redaction is decided.
-docs/ai-sessions/*.zip
+# Raw session exports live in private/ (ignored above). The reviewed, redacted copies in
+# docs/ai-sessions/ are tracked; see docs/ai-sessions/README.md.

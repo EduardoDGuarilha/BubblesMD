@@ -167,3 +167,16 @@ transcription (the boundary words match the screenshots).
   - dismissal lifecycle by pointer and keyboard in both views;
   - regressions.
 - Vitest 45/45, xUnit 14/14.
+
+## 2026-10-16: submission packaging
+
+- **README:** rewritten for reviewers. The detailed verification history moved unchanged to `docs/verification-log.md`.
+- **Demo:** a 2.8 MB web copy of the demo video (H.264/AAC, 1080p, full length) made with a locally available
+  ffmpeg, now in `docs/demo/`. The original stays outside the repository.
+- **Sessions:**
+  - the main session, both investigation forks and two interrupted starts were exported with the app's export;
+  - the raw exports are kept unchanged in `private/`;
+  - the reviewed copies in `docs/ai-sessions/` have only author contact details and unrelated private environment
+    material redacted, as listed there;
+  - no credentials were found.
+- **Open before publishing:** the pop sound's license (see the README credits) and the hosted demo link.
