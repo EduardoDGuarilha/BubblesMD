@@ -29,7 +29,7 @@ Several reviews can be pending at once. Minimized ones sit as small ••• bu
 
 ## Demo
 
-https://github.com/user-attachments/assets/3a03e9ea-082a-4574-b460-3706fad4e42c
+https://github.com/user-attachments/assets/4d4a31f4-1e0b-416c-8c9f-35e9b2124706
 
 [Download the demo](docs/demo/bubbles-md-demo.mp4) (74 s, 1080p, 2.8 MB; compressed from the original screen recording).
 
