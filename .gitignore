@@ -30,3 +30,7 @@ test-results/
 src/server/BubblesMd.Server/wwwroot/
 publish/
 *.tsbuildinfo
+
+# Raw session exports stay untracked until reviewed: they contain the author's global
+# instructions and email (no credentials found). Remove this line once redaction is decided.
+docs/ai-sessions/*.zip

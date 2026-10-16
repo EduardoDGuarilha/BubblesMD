@@ -1,9 +1,29 @@
 # Genuine AI sessions
 
-Retain actual preparation and implementation conversations used for the assessment. Verify a real export early in the chosen Claude environment, preserve checkpoint exports, and inspect the resulting files before submission. In Claude Code the previously researched command is /export [filename]; confirm it works in the environment actually used.
+Bubbles.MD was built in one Claude Code session, in the Claude desktop app's Code tab, with Claude Opus 5.5 as a
+single agent and no subagents.
 
-Suggested file names: YYYY-MM-DD-phase-01-session-01.txt. These are names, not existing transcripts. No transcript has been synthesized or exported by the folder-organization step.
+## Export
 
-Remove credentials before eventual commits and document what was redacted. Preserve real prompts/responses, corrections, failures, and verification; do not replace sessions with retrospective summaries or edit them to manufacture a cleaner process. Keep summaries in progress.md separately.
+- `2026-10-15-build-session-01.zip` comes from the app's own transcript export (the session menu's Export, run by
+  the agent through the app's `export_transcript` tool) on 2026-10-15.
+  - It holds the raw conversation JSONL, the tool results it references (including browser screenshots) and session
+    metadata.
+  - It covers everything up to the final report message, which was written after the export.
+  - Re-export from the session menu to capture the conversation in full.
+- The conversation is unedited. It keeps corrections and failed attempts: a render loop, the undo schema bug, lost
+  clicks on decorations, the docked bubble collapse, the content-root bug and the NuGet feed failure.
+- An earlier test export at the start of the session confirmed the export mechanism works.
 
-The original provided assessment/source files live in ignored private/. Commit only authorized, reviewed, secret-free content. This folder is intended for the genuine session files required by the assessment.
+## Credential check and redaction status
+
+- `gitleaks dir` over the extracted export found no leaks, and a search for OpenRouter key patterns found none.
+- The key was never displayed: it was set by the author outside the chat, and only its presence was checked.
+- **No redactions have been made.** The export does contain non-credential private context injected by the
+  environment:
+  - the author's email address;
+  - the author's global Claude instructions (names of company databases, environment variables and a private
+    package feed URL);
+  - local file paths.
+- The zip is therefore listed in `.gitignore` until the author decides whether to redact those parts before
+  publishing. Any redaction must be disclosed here.
