@@ -735,9 +735,10 @@ button:disabled {
 
 .family {
   position: absolute;
-  left: 70px;
-  width: min(calc(100% - 84px), 540px);
-  padding: 4px 6px 12px;
+  left: 66px;
+  width: min(calc(100% - 80px), 548px);
+  padding: 4px 8px 14px;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;

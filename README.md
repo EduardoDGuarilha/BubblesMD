@@ -41,7 +41,8 @@ npm --prefix src/client install; npm --prefix src/client run dev   # UI on http:
 
 **Zero-cost fixture mode:** start the server with `--Bubbles:Provider=fake`. The fake provider deterministically
 alters, deletes and adds words. These reflection keywords drive failure cases: `#slow`, `#fail`, `#malformed`,
-`#unchanged`, `#cannot`, `#delete`.
+`#unchanged`, `#cannot`, `#delete`, `#same` (no change at first, a real change after the correction) and `#stubborn`
+(no change even after the correction).
 
 **Checks:** `npm --prefix src/client test` (Vitest) and `dotnet test src/server/BubblesMd.slnx` (xUnit).
 
@@ -50,14 +51,19 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 - **Start:** create a document or open/drop a `.md` file (≤ 1 MiB, read locally; nothing is sent anywhere). Saved
   work in this browser reopens automatically. New/Open on an existing document asks before replacing it, and offers
   Export first.
-- **Ask:** select text, then press **+ Bubble** (or Ctrl/Cmd+Alt+M) and write a reflection. Enter submits the first
-  reflection; Shift+Enter adds a line. Selecting, creating and typing never call the model.
-- **Review:** the candidate contains exactly the replacement for your selection.
+- **Ask:** select text, then press the **Bubble** button beside the selection's last line (or Ctrl/Cmd+Alt+M) and
+  write a reflection. Enter submits it; Shift+Enter adds a line. Selecting, creating and typing never call the model.
+- **Review:** the suggestion bubble contains exactly the replacement for your selection.
   - Yellow marks altered wording, red marks deleted wording, and a green **+** marks added text.
-  - Hover or focus any change to pair the source and candidate sides.
-  - Click a change on either side, or press Enter on it, to **pop** it: that edit falls back to the original wording.
-- **Refine:** add or edit reflections (Enter commits them locally; "Thoughts changed" appears), then **Suggest**.
-  Popped edits are sent as explicit "keep original" choices.
+  - Hover or focus any change to highlight the matching spans on both sides.
+  - Click a change on either side, or press Enter on it, to **pop** it: an alteration or deletion falls back to the
+    original wording, and an addition is removed. Popping never changes the document and never calls the model.
+- **Refine:** submit another reflection with Enter and an updated suggestion is requested directly. Blur only saves it.
+  **Suggest** regenerates explicitly. Popped edits are sent as explicit "keep original" choices.
+- **Revise:** after popping edits, **Revise** asks the model to repair the flow of the current proposal without bringing
+  back what you rejected. A chip flags any kept wording that went missing or a removed addition that came back.
+- **No change:** if a result is identical to what it should improve, it is not installed. The server makes one
+  corrective call (both are counted); if that also makes no change, your previous proposal stays and Retry appears.
 - **Decide:** Accept replaces only that passage, as one undoable step. Reject or × discards the review and leaves the
   document unchanged.
 - **Navigate:** Escape or a click outside minimizes the review to a ••• marker beside its passage. Undo/Redo
@@ -108,7 +114,14 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
   - It calls OpenRouter chat completions with a JSON-schema outcome (`replace` / `unchanged` / `cannot_apply`),
     8,000 max output tokens and a 90 s timeout.
   - It rejects truncated, malformed or unsafe output, and returns `usage.cost` (null when absent).
-  - There are no automatic retries or model fallbacks. `GET /api/config` lists modes and rates.
+  - When a result makes no change, it makes exactly one corrective call. That call sends the unsuccessful answer back
+    with an explanation and asks for a meaningful revision. Revise is exempt, and every call is reported with its usage.
+  - It makes no other retries or model fallbacks. `GET /api/config` lists modes and rates.
+- **Bubbles.** Soap-film surfaces (translucent fill, thin rim, a masked iridescent ring and a glint) are sized to their
+  content.
+  - Thought dots are drawn on an overlay from the passage's line to the bubble after every layout pass.
+  - Floating pauses under the pointer, and nearby minimized reviews cluster.
+  - Pops play a synthesized soap-bubble pop (filtered noise burst) with a short rupture animation.
 - **Persistence.** One versioned snapshot is stored in IndexedDB (idb-keyval) with serialized writes. "Saved" shows
   only after a write completes; a failed write shows "Not saved" and keeps the document usable and exportable.
 
@@ -125,7 +138,7 @@ alters, deletes and adds words. These reflection keywords drive failure cases: `
 ## Verification performed
 
 Automated:
-- **Vitest (16):**
+- **Vitest (20):**
   - Bridge fixtures on real Tiptap parse/serialize: repeated words, link text equal to its URL, nested and ordered
     lists, Markdown-looking code, cross-block selections, loud failure.
   - Repeated-wording targeting, far edits vs. nearby-context staleness, refusal of stale Accept, late results after
@@ -133,8 +146,19 @@ Automated:
   - Undo/Redo version linkage: pop on v1 → refine to v2 → Undo restores v1 with its pop and thoughts → Redo restores
     v2 from cache with no request and unchanged spend; Accept → Undo while another review survives.
   - Diff grouping and losslessness.
-- **xUnit (9):** request bounds, outcome parsing with actual cost, unknown cost, empty replacement, truncated /
-  malformed / unsafe output, 402/429 mapping, prompt fencing and keep-original records.
+  - Enter on a second reflection issues one refine with `isNew` and the effective proposal.
+  - An unchanged result is not installed: the previous version and reflections are kept, and both attempts are in
+    the ledger.
+  - Formatting-only changes and intentional deletions count as real changes.
+  - Revise works from the effective proposal and flags missing kept wording.
+- **xUnit (14):**
+  - request bounds, outcome parsing with actual cost, unknown cost, empty replacement, truncated / malformed / unsafe
+    output, 402/429 mapping, prompt fencing and keep-original records;
+  - the no-change rule: whitespace vs. paragraph and formatting changes;
+  - exactly one correction, with both calls reported;
+  - still unchanged after the correction → no third call;
+  - Revise is never corrected;
+  - a failed correction still reports the first call.
 
 Walked through in the in-app browser:
 - Import; select → + Bubble → reflection → candidate; pop from source and from candidate; Accept → Undo/Redo;
@@ -144,6 +168,17 @@ Walked through in the in-app browser:
 - Busy, edit-during-generation (installed as outdated), provider failure with Retry, cancel during generation,
   Retarget, and keyboard pop.
 - Layouts: 1440×900, 1024×768, 1280×560 (offscreen source and a long three-reflection family) and 390×844.
+- Revision of 2026-10-16:
+  - a working slice measured in the real editor: plus icons centred (0 px offset), unchanged line height beside
+    insertion markers, content-sized reflections, computed dots;
+  - hover highlighting with no connector line;
+  - real clicks popping added (source +), altered (suggestion) and deleted (source) changes, with hover cleared;
+  - Enter-to-refine;
+  - fixture `#same` (corrected, 2 calls) and `#stubborn` (failure with Retry, proposal kept);
+  - Revise, including "nothing to revise";
+  - a clustered markers / long family / generating state at 1440 and the docked dark layout at 390;
+  - regression checks after the revision: Accept/Undo/Redo, Markdown switch, outside-click minimize and reload
+    recovery.
 - The published app started from `./publish` and served UI, API and SPA fallback.
 
 Live OpenRouter calls: five completed for $0.0135 actual (returned `usage.cost`), plus one interrupted by a reload
@@ -153,6 +188,11 @@ with unknown cost, well within the $5 key cap.
 - **Fast:** outdated refresh ($0.00036, 3.8 s), a grammar/tone fix on the published build that kept the facts
   ($0.00015), and the same mid-word selection after the prompt fix, which now continues the fragment correctly
   ($0.00015).
+- **After the 2026-10-16 revision (all within the $5 cap):**
+  - Smart initial suggestion ($0.0042), then "too verbose" submitted with Enter: a genuinely shorter refinement on the
+    first call (53 → 44 words, $0.0048, no correction needed);
+  - Fast Revise after keeping one original phrase: coherent repair, nothing flagged ($0.00044). It also reworded one
+    later phrase beyond the minimal repair, which shows in the diff.
 
 ## Known limitations
 
@@ -160,7 +200,9 @@ with unknown cost, well within the $5 key cap.
   untested near the 1 MiB import limit.
 - A selection that cuts through a word is sent as-is. The prompt now states mid-word boundaries; this fixed the one
   observed case, but a model can still produce an awkward join, so check the diff before accepting.
-- Pairing lines are drawn for the first line of a multi-line change only.
+- The no-change check is textual: it proves the text changed, not that it improved. Revise asks for minimal repairs,
+  but a model may still reword more than needed; the diff shows it and each edit can be popped.
+- Thought dots are recomputed on every layout pass but do not follow the ±1.5 px float exactly.
 - The pop sound uses Web Audio and may be silent until the page has had a user gesture.
 - No accounts, sync, multiplayer or server storage (by design). Browser storage is local recovery, not a backup.
 
